@@ -42,7 +42,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 
 ## What works today
 
-341 of the 481 commands in Notepad++'s menus are implemented. In short:
+404 of the 481 commands in Notepad++'s menus are implemented. In short:
 
 **Editing**
 - Syntax highlighting and folding for 94 languages, with Notepad++'s keywords and file extensions
@@ -52,7 +52,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
   and 14 kinds of sort
 - Case conversion (upper, lower, proper, sentence, invert, random), comment and uncomment,
   trimming and tab/space conversion
-- Auto-indent, brace highlighting and go to matching brace, bookmarks, read-only mode
+- Auto-indent, brace highlighting and go to matching brace, bookmarks, read-only mode, redact selection
 - Unlimited undo and redo, kept per tab
 
 **Files**
@@ -64,7 +64,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 **Search**
 - Find, find previous, count and replace above the keyboard
 - Match case, whole word, wrap around and regular expressions with groups
-- Find the selection or the word under the caret, incremental search, go to line
+- Find the selection or the word under the caret, incremental search, find characters in a range, go to line
 - Marks: highlight every occurrence in one of five colours, jump between them, copy them;
   mark everything a search finds and bookmark those lines
 - Bookmarks, with cut, copy, replace and remove for all bookmarked lines at once
@@ -72,7 +72,12 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 **View**
 - Notepad++'s default theme, dark mode and 22 further themes; the app around the editor turns light or dark to match
 - Word wrap, show spaces / tabs / line endings / indent guides, zoom, line numbers, fold levels
+- Hide lines, full screen and distraction free mode
 - Document summary
+
+**Tools and windows**
+- MD5, SHA-1, SHA-256 and SHA-512 of a text, of files, or of the selection
+- Sort the tabs by name, path, type, size or time, colour them, and jump to any open document from a list
 
 ## Made for touch
 
