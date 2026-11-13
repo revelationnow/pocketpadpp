@@ -12,6 +12,7 @@ import io.github.revelationnow.pocketpadpp.core.Session
 import io.github.revelationnow.pocketpadpp.core.SessionEntry
 import io.github.revelationnow.pocketpadpp.core.SessionStore
 import io.github.revelationnow.pocketpadpp.core.TextEncodings
+import io.github.revelationnow.pocketpadpp.core.TextTransforms
 import io.github.revelationnow.pocketpadpp.core.ThemeApplier
 import io.github.revelationnow.pocketpadpp.core.ViewMetrics
 import io.github.revelationnow.pocketpadpp.core.sendText
@@ -327,6 +328,149 @@ private fun testEditOps() {
     ScintillaNative.destroy(sci.ptr)
 }
 
+private fun testTransforms() {
+    val t = TextTransforms
+    eq("Hello World, Don't Stop 3rd", t.properCase("hELLO wORLD, don't stop 3rd", blend = false), "proper case")
+    eq("HELLO WORLD McDonald", t.properCase("hELLO wORLD mcDonald", blend = true), "proper case blend only raises first letters")
+    eq("One two. Three! Four?\nFive", t.sentenceCase("one TWO. three! FOUR?\nfive", blend = false), "sentence case")
+    eq("One TWO. Three", t.sentenceCase("one TWO. three", blend = true), "sentence case blend")
+    eq("3.14 is pi. Yes", t.sentenceCase("3.14 is pi. yes", blend = false), "a decimal point does not end a sentence")
+    eq("hELLO wORLD 1é", t.invertCase("Hello World 1É"), "invert case")
+    eq("abc def", t.randomCase("ABC def", java.util.Random(1)).lowercase(), "random case only changes case")
+
+    eq("a   b", t.tabsToSpaces("a\tb", 4), "tab to space reaches the next stop")
+    eq("        x", t.tabsToSpaces("\t\tx", 4), "leading tabs to spaces")
+    eq("\t\tx", t.spacesToTabs("        x", 4, leadingOnly = true), "leading spaces to tabs")
+    eq("\t  x  y", t.spacesToTabs("      x  y", 4, leadingOnly = true), "leading only leaves inner blanks, keeps the remainder")
+    eq("a\tb c", t.spacesToTabs("a   b c", 4, leadingOnly = false), "inner run reaching a tab stop becomes a tab; single spaces stay")
+    eq("\tx", t.spacesToTabs("  \tx", 4, leadingOnly = true), "mixed indentation is normalised")
+    eq("x", t.trimBoth(" \t x\t "), "trim both")
+
+    val lines = listOf("b", "A", "c", "B", "a")
+    eq(listOf("A", "B", "a", "b", "c"), t.sort(lines, TextTransforms.Sort.LEXICOGRAPHIC, false), "lexicographic sort")
+    eq(listOf("A", "a", "b", "B", "c"), t.sort(lines, TextTransforms.Sort.IGNORE_CASE, false), "case-insensitive sort is stable")
+    eq(listOf("c", "B", "b", "a", "A"), t.sort(lines, TextTransforms.Sort.IGNORE_CASE, true), "case-insensitive descending")
+    eq(listOf("x", "-5", "2 apples", "10", "33"), t.sort(listOf("10", "2 apples", "x", "33", "-5"), TextTransforms.Sort.INTEGER, false), "integer sort, non-numbers first")
+    eq(listOf("1,5", "2", "10,25"), t.sort(listOf("10,25", "2", "1,5"), TextTransforms.Sort.DECIMAL_COMMA, false), "decimal comma sort")
+    eq(listOf("0.5", "1.25", "3"), t.sort(listOf("3", "0.5", "1.25"), TextTransforms.Sort.DECIMAL_DOT, false), "decimal dot sort")
+    eq(listOf("3", "1.25", "0.5"), t.sort(listOf("3", "0.5", "1.25"), TextTransforms.Sort.DECIMAL_DOT, true), "decimal dot descending")
+    eq(listOf("é", "aa", "bbb"), t.sort(listOf("bbb", "é", "aa"), TextTransforms.Sort.LENGTH, false), "length sort counts characters, not bytes")
+    eq(listOf("a", "b", "a"), t.removeConsecutiveDuplicates(listOf("a", "a", "b", "b", "a")), "consecutive duplicates")
+}
+
+private fun testMoreEditOps() {
+    val sci = HostSci()
+    sci.text = "hello WORLD"
+    sci.send(Sci.SCI_SETSEL, 0, 11)
+    ok(EditOps.transformSelection(sci) { TextTransforms.invertCase(it) }, "transform selection runs")
+    eq("HELLO world" to "0-11", sci.text to sci.selection, "case converted and still selected")
+    sci.send(Sci.SCI_GOTOPOS, 0)
+    ok(!EditOps.transformSelection(sci) { it.uppercase() }, "nothing selected, nothing converted")
+
+    sci.text = "b 2\nA 1\na 3"
+    EditOps.sortLines(sci, descending = false, kind = TextTransforms.Sort.IGNORE_CASE)
+    eq("A 1\na 3\nb 2", sci.text, "sort ignoring case through the editor")
+    sci.text = "x\nx\ny\nx"
+    EditOps.removeConsecutiveDuplicateLines(sci)
+    eq("x\ny\nx", sci.text, "remove consecutive duplicate lines")
+    sci.text = "1\n2\n3\n4"
+    EditOps.shuffleLines(sci, java.util.Random(7))
+    eq(listOf("1", "2", "3", "4"), sci.text.split("\n").sorted(), "shuffle keeps every line")
+
+    sci.send(Sci.SCI_SETTABWIDTH, 4)
+    sci.text = "\ta\n        b"
+    EditOps.tabsToSpaces(sci)
+    eq("    a\n        b", sci.text, "tab to space")
+    EditOps.spacesToTabs(sci, leadingOnly = true)
+    eq("\ta\n\t\tb", sci.text, "space to tab, leading")
+    sci.text = "  a  \n b \n\tc"
+    EditOps.mapLines(sci) { TextTransforms.trimLeading(it) }
+    eq("a  \nb \nc", sci.text, "trim leading space")
+    sci.text = " one \n two \nthree"
+    EditOps.eolToSpace(sci, trim = true)
+    eq("one two three", sci.text, "trim both and EOL to space")
+    sci.text = "a\nb\nc"
+    sci.send(Sci.SCI_SETSEL, 0, 3)
+    EditOps.eolToSpace(sci, trim = false)
+    eq("a b\nc", sci.text, "EOL to space on the selection only")
+
+    sci.text = "int a;\n  // b\n"
+    sci.send(Sci.SCI_SETSEL, 0, sci.send(Sci.SCI_GETLENGTH))
+    EditOps.setLineComment(sci, "//", comment = true)
+    eq("// int a;\n  // // b\n", sci.text, "single line comment always adds")
+    sci.send(Sci.SCI_SETSEL, 0, sci.send(Sci.SCI_GETLENGTH))
+    EditOps.setLineComment(sci, "//", comment = false)
+    eq("int a;\n  // b\n", sci.text, "single line uncomment removes one level")
+    sci.text = "a = b + c;"
+    sci.send(Sci.SCI_SETSEL, 4, 9)
+    ok(EditOps.streamComment(sci, "/*", "*/"), "block comment")
+    eq("a = /* b + c */;" to "4-15", sci.text to sci.selection, "selection wrapped and still selected")
+    ok(EditOps.streamUncomment(sci, "/*", "*/"), "block uncomment")
+    eq("a = b + c;" to "4-9", sci.text to sci.selection, "block comment removed")
+    ok(!EditOps.streamUncomment(sci, "/*", "*/"), "nothing to uncomment")
+
+    sci.text = "first\nsecond"
+    sci.send(Sci.SCI_GOTOPOS, 8)
+    EditOps.insertBlankLine(sci, above = true)
+    eq("first\n\nsecond" to 6L, sci.text to sci.send(Sci.SCI_GETCURRENTPOS), "blank line above, caret on it")
+    sci.send(Sci.SCI_GOTOPOS, 9)
+    EditOps.insertBlankLine(sci, above = false)
+    eq("first\n\nsecond\n" to 14L, sci.text to sci.send(Sci.SCI_GETCURRENTPOS), "blank line below, caret on it")
+
+    sci.send(Sci.SCI_SETMULTIPLESELECTION, 1)
+    sci.send(Sci.SCI_SETADDITIONALSELECTIONTYPING, 1)
+    sci.text = "cat Cat cats cat"
+    sci.send(Sci.SCI_SETSEL, 0, 3)
+    EditOps.multiSelectAll(sci, matchCase = false, wholeWord = false)
+    eq(4L, sci.send(Sci.SCI_GETSELECTIONS), "multi-select all, ignoring case and word boundaries")
+    sci.send(Sci.SCI_SETSEL, 0, 3)
+    EditOps.multiSelectAll(sci, matchCase = true, wholeWord = true)
+    eq(2L, sci.send(Sci.SCI_GETSELECTIONS), "multi-select all, match case and whole word")
+    ScintillaNative.insertText(sci.ptr, "dog")
+    eq("dog Cat cats dog", sci.text, "typing replaces every selected occurrence")
+    sci.send(Sci.SCI_SETSEL, 0, 3)
+    EditOps.multiSelectNext(sci, matchCase = false, wholeWord = false)
+    eq(2L, sci.send(Sci.SCI_GETSELECTIONS), "multi-select next adds one")
+    EditOps.multiSelectUndo(sci)
+    eq(1L to "0-3", sci.send(Sci.SCI_GETSELECTIONS) to sci.selection, "undo the latest multi-select")
+    sci.text = "ab ab ab"
+    sci.send(Sci.SCI_SETSEL, 0, 2)
+    EditOps.multiSelectNext(sci, matchCase = true, wholeWord = false)
+    EditOps.multiSelectSkip(sci, matchCase = true, wholeWord = false)
+    val picked = (0 until sci.send(Sci.SCI_GETSELECTIONS)).map { sci.send(Sci.SCI_GETSELECTIONNSTART, it) }.sorted()
+    eq(listOf(0L, 6L), picked, "skip moves the latest selection to the following occurrence")
+    sci.send(Sci.SCI_SETSEL, 0, 0)
+
+    sci.setLexer("cpp")
+    sci.sendStrings(Sci.SCI_SETPROPERTY, "fold", "1")
+    sci.text = "void a() {\n\tif (x) {\n\t\ty();\n\t}\n}\nvoid b() {\n\tz();\n}\n"
+    EditOps.foldLevel(sci, 2, collapse = true)
+    eq(listOf(1L), EditOps.foldedLines(sci), "fold level 2 collapses only the inner block")
+    EditOps.foldLevel(sci, 1, collapse = true)
+    eq(listOf(0L, 1L, 5L), EditOps.foldedLines(sci), "fold level 1 collapses the functions")
+    val folded = EditOps.foldedLines(sci)
+    sci.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_EXPAND.toLong())
+    eq(emptyList<Long>(), EditOps.foldedLines(sci), "everything unfolded")
+    EditOps.restoreFolds(sci, folded)
+    eq(listOf(0L, 1L, 5L), EditOps.foldedLines(sci), "fold state restored")
+    EditOps.foldLevel(sci, 1, collapse = false)
+    sci.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_EXPAND.toLong())
+    sci.send(Sci.SCI_GOTOPOS, sci.send(Sci.SCI_POSITIONFROMLINE, 6))
+    EditOps.foldCurrent(sci, collapse = true)
+    eq(listOf(5L), EditOps.foldedLines(sci), "fold current level folds the enclosing block")
+    EditOps.foldCurrent(sci, collapse = false)
+    eq(emptyList<Long>(), EditOps.foldedLines(sci), "unfold current level")
+
+    sci.text = "f(a, [b])"
+    sci.send(Sci.SCI_GOTOPOS, 2)
+    ok(EditOps.selectBetweenBraces(sci), "select between braces")
+    eq("2-8", sci.selection, "inside of the parentheses selected")
+    sci.text = "alpha beta"
+    sci.send(Sci.SCI_GOTOPOS, 7)
+    eq("beta" to "6-10", EditOps.selectionOrWord(sci) to sci.selection, "word at the caret is selected and returned")
+    ScintillaNative.destroy(sci.ptr)
+}
+
 private fun testSession() {
     val session = Session(
         1,
@@ -348,6 +492,8 @@ fun main(args: Array<String>) {
     testLexers(registry, theme)
     testSearch()
     testEditOps()
+    testTransforms()
+    testMoreEditOps()
     testSession()
     println("core: ${checks - failures}/$checks checks passed")
     exitProcess(if (failures == 0) 0 else 1)
