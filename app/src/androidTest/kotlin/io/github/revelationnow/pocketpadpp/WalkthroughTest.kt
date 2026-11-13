@@ -1097,6 +1097,19 @@ class WalkthroughTest {
             adopted.finishComposingText()
         }
         assertEquals("without Ctrl the keyboard composes as usual", "hello woPASTEPASTEx", text())
+        // The caret can also sit inside the adopted word; the key is then the letter added there, not the last one.
+        setText("abcdef")
+        sci(Sci.SCI_GOTOPOS, 3)
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val adopted = it.editor.onCreateInputConnection(EditorInfo())!!
+            adopted.setComposingRegion(0, 6)
+            adopted.setComposingText("abcadef", 1)
+        }
+        assertEquals("Ctrl+A with the caret inside a word", "0-6", selection())
+        assertEquals("abcdef", text())
+        assertEquals("no tab was closed or opened by mistake", 1, onUi { it.workspace.docs.size })
 
         // A hardware keyboard goes through the same table.
         val now = SystemClock.uptimeMillis()

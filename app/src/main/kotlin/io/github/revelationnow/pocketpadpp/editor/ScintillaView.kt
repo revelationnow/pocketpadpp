@@ -230,11 +230,12 @@ class ScintillaView @JvmOverloads constructor(
                 if (text.length == 1) typed = text[0]
             } else {
                 // With suggestions on, the keyboard sends the whole word it is composing on every key press,
-                // and after a paste or a tap it adopts the word next to the caret. The key just pressed is the
-                // one character added to the end of that word.
+                // and after a paste or a tap it adopts the word around the caret. The key just pressed is the
+                // one character added to that word, at the caret.
                 ScintillaNative.imeState(ptr, imeState)
                 val composed = if (imeState[2] >= 0) imeState[3] - imeState[2] else 0
-                if (text.length == composed + 1) typed = text[text.length - 1]
+                val caretInWord = if (imeState[2] >= 0 && imeState[0] == imeState[1]) imeState[0] - imeState[2] else composed
+                if (text.length == composed + 1) typed = text[caretInWord.coerceIn(0, composed)]
             }
         }
         if (typed == null) {
