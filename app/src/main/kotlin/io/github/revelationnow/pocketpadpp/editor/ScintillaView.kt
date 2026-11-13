@@ -844,6 +844,8 @@ class ScintillaView @JvmOverloads constructor(
         send(Sci.SCI_SETMULTIPASTE, Sci.SC_MULTIPASTE_EACH.toLong())
         send(Sci.SCI_SETEXTRAASCENT, density.roundToInt().toLong())
         send(Sci.SCI_SETEXTRADESCENT, density.roundToInt().toLong())
+        // Scintilla draws visible spaces as dots one pixel wide by default, which a phone screen swallows.
+        send(Sci.SCI_SETWHITESPACESIZE, (2 * density).roundToInt().coerceAtLeast(1).toLong())
     }
 
     companion object {

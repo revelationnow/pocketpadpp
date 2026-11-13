@@ -5,7 +5,7 @@ Usage: python3 tools/gen_npp_tables.py /path/to/notepad-plus-plus
 
 Writes app/src/main/assets/npp/languages.tsv with one row per language:
     name, display name, Lexilla lexer, kind, keyword-list mask, lexer properties
-and copies langs.model.xml and stylers.model.xml next to it, unmodified.
+and copies langs.model.xml, stylers.model.xml and the bundled themes next to it, unmodified.
 
 "kind" says which of Notepad++'s lexer setup routines the language uses; the generic one sends
 keyword class N to keyword set N for every bit set in the mask (see ScintillaEditView::setLexer).
@@ -73,7 +73,16 @@ def main(npp):
     (OUT / "languages.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
     for name in ("langs.model.xml", "stylers.model.xml"):
         shutil.copyfile(src / name, OUT / name)
-    print(f"{len(lines) - 2} languages")
+    # Notepad++'s bundled themes, unmodified. Each is a complete style file like stylers.model.xml.
+    themes = OUT / "themes"
+    themes.mkdir(exist_ok=True)
+    for old in themes.glob("*.xml"):
+        old.unlink()
+    count = 0
+    for theme in sorted((pathlib.Path(npp) / "PowerEditor/installer/themes").glob("*.xml")):
+        shutil.copyfile(theme, themes / theme.name)
+        count += 1
+    print(f"{len(lines) - 2} languages, {count} themes")
 
 
 if __name__ == "__main__":

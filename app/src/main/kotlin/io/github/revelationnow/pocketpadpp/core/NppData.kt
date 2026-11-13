@@ -180,6 +180,18 @@ class NppTheme private constructor(
     fun global(name: String): WordStyle? = globals.firstOrNull { it.name == name }
     val lexerNames: Set<String> get() = lexers.keys
 
+    /** Editor background and text colours, for tinting the application around the editor. */
+    val background: Int get() = global("Default Style")?.bg ?: 0xFFFFFF
+    val foreground: Int get() = global("Default Style")?.fg ?: 0x000000
+
+    /** True when the editor background is dark, judged by its perceived brightness. */
+    val isDark: Boolean
+        get() {
+            val bg = background
+            val luminance = 0.299 * ((bg shr 16) and 0xFF) + 0.587 * ((bg shr 8) and 0xFF) + 0.114 * (bg and 0xFF)
+            return luminance < 128
+        }
+
     companion object {
         fun load(stylersXml: InputStream): NppTheme {
             val lexers = LinkedHashMap<String, MutableList<WordStyle>>()

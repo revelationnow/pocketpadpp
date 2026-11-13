@@ -106,7 +106,7 @@ object FileIo {
             try {
                 context.contentResolver.takePersistableUriPermission(uri, flags)
                 return
-            } catch (e: SecurityException) {
+            } catch (e: Exception) {
                 // Not offered for this URI; try the weaker grant, then give up quietly.
             }
         }

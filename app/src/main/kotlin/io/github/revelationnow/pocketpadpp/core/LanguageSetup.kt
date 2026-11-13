@@ -180,6 +180,8 @@ class ViewMetrics(
     val foldMarginWidth: Int = 24,
     val leftPadding: Int = 4,
     val showLineNumbers: Boolean = true,
+    /** Device pixels per density-independent pixel, for line widths Scintilla defines in pixels. */
+    val pixelScale: Float = 1f,
 )
 
 /** Applies a Notepad++ style file to a Scintilla view. Styles belong to the view, so this runs on every tab switch. */
@@ -256,14 +258,18 @@ object ThemeApplier {
             sci.send(Sci.SCI_MARKERSETFORE, marker.toLong(), boxFill)
             sci.send(Sci.SCI_MARKERSETBACK, marker.toLong(), boxLine)
             sci.send(Sci.SCI_MARKERSETBACKSELECTED, marker.toLong(), active)
+            // Stroke width is in hundredths of a pixel; one pixel is too faint on dense screens.
+            sci.send(Sci.SCI_MARKERSETSTROKEWIDTH, marker.toLong(), (metrics.pixelScale * 100).toLong().coerceAtLeast(100))
         }
         sci.send(
             Sci.SCI_SETAUTOMATICFOLD,
             (Sci.SC_AUTOMATICFOLD_SHOW or Sci.SC_AUTOMATICFOLD_CLICK or Sci.SC_AUTOMATICFOLD_CHANGE).toLong(),
         )
+        // The bookmark margin is hidden, so a bookmark shows as a tint on its line that works on any theme.
         sci.send(Sci.SCI_MARKERDEFINE, BOOKMARK_MARKER.toLong(), Sci.SC_MARK_BOOKMARK.toLong())
         sci.send(Sci.SCI_MARKERSETFORE, BOOKMARK_MARKER.toLong(), sciColour(0x2020A0))
-        sci.send(Sci.SCI_MARKERSETBACK, BOOKMARK_MARKER.toLong(), sciColour(0xBFD4FF))
+        sci.send(Sci.SCI_MARKERSETBACK, BOOKMARK_MARKER.toLong(), sciColour(0x3A7BD5))
+        sci.send(Sci.SCI_MARKERSETALPHA, BOOKMARK_MARKER.toLong(), 70)
     }
 
     /** Sizes the line number margin for the document's line count, as Notepad++ does. */

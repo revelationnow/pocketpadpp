@@ -13,20 +13,20 @@ import android.os.Looper
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import io.github.revelationnow.pocketpadpp.app.Doc
 import io.github.revelationnow.pocketpadpp.app.FileIo
 import io.github.revelationnow.pocketpadpp.app.FindBar
 import io.github.revelationnow.pocketpadpp.app.LoadedFile
+import io.github.revelationnow.pocketpadpp.app.MenuSheet
+import io.github.revelationnow.pocketpadpp.app.MenuSpec
 import io.github.revelationnow.pocketpadpp.app.TabStrip
 import io.github.revelationnow.pocketpadpp.app.Workspace
 import io.github.revelationnow.pocketpadpp.core.EditOps
@@ -35,6 +35,7 @@ import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
 import io.github.revelationnow.pocketpadpp.core.TextEncodings
+import io.github.revelationnow.pocketpadpp.core.TextTransforms
 import io.github.revelationnow.pocketpadpp.core.ThemeApplier
 import io.github.revelationnow.pocketpadpp.core.ViewMetrics
 import io.github.revelationnow.pocketpadpp.editor.ScintillaView
@@ -48,10 +49,11 @@ import kotlin.math.roundToInt
  */
 class MainActivity : Activity() {
 
-    private lateinit var editor: ScintillaView
-    private lateinit var workspace: Workspace
+    // Internal rather than private so that the on-device tests can inspect them.
+    internal lateinit var editor: ScintillaView
+    internal lateinit var workspace: Workspace
     private lateinit var tabs: TabStrip
-    private lateinit var findBar: FindBar
+    internal lateinit var findBar: FindBar
     private lateinit var statusText: TextView
     private lateinit var eolChip: TextView
     private lateinit var encodingChip: TextView
@@ -73,6 +75,7 @@ class MainActivity : Activity() {
     private var saveAsDoc: Doc? = null
     private var saveAsCopy = false
     private var afterSave: (() -> Unit)? = null
+    private var menuSheet: MenuSheet? = null
 
     private fun dp(value: Float): Int = (value * resources.displayMetrics.density).roundToInt()
 
@@ -143,12 +146,15 @@ class MainActivity : Activity() {
         editor.keyboardMode = if (prefs.getBoolean("textKeyboard", false)) ScintillaView.KeyboardMode.TEXT else ScintillaView.KeyboardMode.CODE
 
         workspace = Workspace(this, editor, languages, theme) {
-            ViewMetrics(fontSize = fontSize, foldMarginWidth = dp(22f), leftPadding = dp(4f), showLineNumbers = showLineNumbers)
+            ViewMetrics(
+                fontSize = fontSize, foldMarginWidth = dp(22f), leftPadding = dp(4f),
+                showLineNumbers = showLineNumbers, pixelScale = resources.displayMetrics.density,
+            )
         }
         workspace.onTabsChanged = { refreshTabs() }
         tabs.onSelect = { index -> workspace.docs.getOrNull(index)?.let { workspace.activate(it) } }
         tabs.onClose = { index -> workspace.docs.getOrNull(index)?.let { requestClose(it) } }
-        tabs.onLongPress = { index, view -> workspace.docs.getOrNull(index)?.let { showTabMenu(it, view) } }
+        tabs.onLongPress = { index, _ -> workspace.docs.getOrNull(index)?.let { showTabMenu(it) } }
 
         editor.onStateChanged = { onEditorStateChanged() }
         editor.onTextChanged = { workspace.textChanged() }
@@ -262,9 +268,9 @@ class MainActivity : Activity() {
             maxLines = 1
             setOnClickListener(action)
         }.also { bar.addView(it) }
-        languageChip = chip { chooseLanguage() }
-        eolChip = chip { showEolMenu(it) }
-        encodingChip = chip { showEncodingMenu(it) }
+        languageChip = chip { showMenu("Language") { languageMenu() } }
+        eolChip = chip { showMenu("EOL Conversion") { eolItems() } }
+        encodingChip = chip { showMenu("Encoding") { encodingMenu() } }
         return bar
     }
 
@@ -326,7 +332,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openUris(uris: List<Uri>) {
+    internal fun openUris(uris: List<Uri>) {
         for (uri in uris) {
             val existing = workspace.findByUri(uri)
             if (existing != null) {
@@ -464,6 +470,7 @@ class MainActivity : Activity() {
     /** Closes a tab, first asking about unsaved changes as Notepad++ does. */
     private fun requestClose(doc: Doc, then: (() -> Unit)? = null) {
         if (!workspace.isDirty(doc)) {
+            rememberRecent(doc)
             workspace.close(doc)
             then?.invoke()
             return
@@ -472,8 +479,8 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Save")
             .setMessage("Save file \"${doc.name}\"?")
-            .setPositiveButton("Yes") { _, _ -> save(doc) { workspace.close(doc); then?.invoke() } }
-            .setNegativeButton("No") { _, _ -> workspace.close(doc); then?.invoke() }
+            .setPositiveButton("Yes") { _, _ -> save(doc) { rememberRecent(doc); workspace.close(doc); then?.invoke() } }
+            .setNegativeButton("No") { _, _ -> rememberRecent(doc); workspace.close(doc); then?.invoke() }
             .setNeutralButton(android.R.string.cancel, null)
             .show()
     }
@@ -520,64 +527,21 @@ class MainActivity : Activity() {
 
     // region Menus
 
-    private class MenuSpec {
-        class Entry(val label: String, val enabled: Boolean, val checked: Boolean?, val action: (() -> Unit)?, val children: MenuSpec?)
-
-        val entries = ArrayList<Entry>()
-
-        fun item(label: String, enabled: Boolean = true, checked: Boolean? = null, action: () -> Unit) {
-            entries += Entry(label, enabled, checked, action, null)
-        }
-
-        /** One level of nesting is all Android menus allow; deeper levels open as a fresh popup. */
-        fun sub(label: String, build: MenuSpec.() -> Unit) {
-            entries += Entry(label, true, null, null, MenuSpec().apply(build))
+    private fun showMenu(title: String, build: MenuSpec.() -> Unit) {
+        menuSheet?.dismiss()
+        menuSheet = MenuSheet(this).also { sheet ->
+            sheet.onAction = { updateStatus() }
+            sheet.show(title, build)
         }
     }
 
-    private fun showMenu(anchor: View, build: MenuSpec.() -> Unit) {
-        val popup = PopupMenu(this, anchor)
-        val actions = HashMap<Int, () -> Unit>()
-        var nextId = 1
-        fun add(menu: Menu, spec: MenuSpec, nested: Boolean) {
-            for (entry in spec.entries) {
-                val children = entry.children
-                if (children != null && !nested) {
-                    add(menu.addSubMenu(entry.label), children, nested = true)
-                } else {
-                    val id = nextId++
-                    val item = menu.add(Menu.NONE, id, Menu.NONE, if (children != null) "${entry.label}  ▸" else entry.label)
-                    item.isEnabled = entry.enabled
-                    if (entry.checked != null) {
-                        item.isCheckable = true
-                        item.isChecked = entry.checked
-                    }
-                    actions[id] = if (children != null) {
-                        { showMenu(anchor) { entries += children.entries } }
-                    } else {
-                        entry.action ?: {}
-                    }
-                }
-            }
-        }
-        add(popup.menu, MenuSpec().apply(build), nested = false)
-        popup.setOnMenuItemClickListener { item ->
-            actions[item.itemId]?.let { action ->
-                action()
-                updateStatus()
-            }
-            true
-        }
-        popup.show()
-    }
-
-    private fun showMainMenu() = showMenu(moreButton) {
+    private fun showMainMenu() = showMenu("Menu") {
         sub("File") { fileMenu() }
         sub("Edit") { editMenu() }
         sub("Search") { searchMenu() }
         sub("View") { viewMenu() }
         sub("Encoding") { encodingMenu() }
-        item("Language...") { chooseLanguage() }
+        sub("Language") { languageMenu() }
         sub("Settings") { settingsMenu() }
     }
 
@@ -599,10 +563,20 @@ class MainActivity : Activity() {
             item("Close All to the Right") { closeMany(workspace.docs.drop(index + 1)) }
             item("Close All Unchanged") { closeMany(workspace.docs.filter { !workspace.isDirty(it) }) }
         }
+        sub("Recent Files") {
+            val recent = recentFiles()
+            for ((uri, name) in recent) {
+                item(name) { openUris(listOf(uri)) }
+            }
+            item("Restore Recent Closed File", enabled = recent.isNotEmpty()) { openUris(listOf(recent.first().first)) }
+            item("Open All Recent Files", enabled = recent.isNotEmpty()) { openUris(recent.map { it.first }) }
+            item("Empty Recent Files List", enabled = recent.isNotEmpty()) { prefs.edit().remove("recent").apply() }
+        }
     }
 
     private fun MenuSpec.editMenu() {
         val readOnly = editor.send(Sci.SCI_GETREADONLY) != 0L
+        val language = workspace.active.language
         item("Undo", enabled = editor.send(Sci.SCI_CANUNDO) != 0L) { editor.send(Sci.SCI_UNDO) }
         item("Redo", enabled = editor.send(Sci.SCI_CANREDO) != 0L) { editor.send(Sci.SCI_REDO) }
         item("Cut") { editor.send(Sci.SCI_CUT) }
@@ -610,37 +584,112 @@ class MainActivity : Activity() {
         item("Paste") { editor.send(Sci.SCI_PASTE) }
         item("Delete") { editor.send(Sci.SCI_CLEAR) }
         item("Select All") { editor.send(Sci.SCI_SELECTALL) }
+        item(if (beginSelect == null) "Begin/End Select" else "Begin/End Select (end here)") { beginEndSelect(column = false) }
+        item(if (beginSelect == null) "Begin/End Select in Column Mode" else "Begin/End Select in Column Mode (end here)") {
+            beginEndSelect(column = true)
+        }
+        sub("Insert") {
+            item("Date Time (short)") { insertDateTime(java.text.DateFormat.SHORT) }
+            item("Date Time (long)") { insertDateTime(java.text.DateFormat.LONG) }
+        }
+        sub("Copy to Clipboard") {
+            val uri = workspace.active.uri
+            item("Copy Current Full File path", enabled = uri != null) { editor.setClipboard(uri.toString()) }
+            item("Copy Current Filename") { editor.setClipboard(workspace.active.name) }
+            item("Copy All Filenames") { editor.setClipboard(workspace.docs.joinToString("\n") { it.name }) }
+            item("Copy All File Paths") { editor.setClipboard(workspace.docs.mapNotNull { it.uri?.toString() }.joinToString("\n")) }
+        }
         sub("Indent") {
             item("Increase Line Indent") { editor.send(Sci.SCI_TAB) }
             item("Decrease Line Indent") { editor.send(Sci.SCI_BACKTAB) }
         }
         sub("Convert Case to") {
+            fun convert(label: String, transform: (String) -> String) = item(label) {
+                if (!EditOps.transformSelection(editor, transform)) toast("Select some text first")
+            }
             item("UPPERCASE") { editor.send(Sci.SCI_UPPERCASE) }
             item("lowercase") { editor.send(Sci.SCI_LOWERCASE) }
+            convert("Proper Case") { TextTransforms.properCase(it, blend = false) }
+            convert("Proper Case (blend)") { TextTransforms.properCase(it, blend = true) }
+            convert("Sentence case") { TextTransforms.sentenceCase(it, blend = false) }
+            convert("Sentence case (blend)") { TextTransforms.sentenceCase(it, blend = true) }
+            convert("iNVERT cASE") { TextTransforms.invertCase(it) }
+            convert("ranDOm CasE") { TextTransforms.randomCase(it) }
         }
         sub("Line Operations") {
             item("Duplicate Current Line") { editor.send(Sci.SCI_SELECTIONDUPLICATE) }
             item("Remove Duplicate Lines") { EditOps.removeDuplicateLines(editor) }
+            item("Remove Consecutive Duplicate Lines") { EditOps.removeConsecutiveDuplicateLines(editor) }
+            item("Split Lines") { EditOps.splitLines(editor) }
             item("Join Lines") { EditOps.joinLines(editor) }
             item("Move Up Current Line") { editor.send(Sci.SCI_MOVESELECTEDLINESUP) }
             item("Move Down Current Line") { editor.send(Sci.SCI_MOVESELECTEDLINESDOWN) }
             item("Remove Empty Lines") { EditOps.removeEmptyLines(editor, includeBlank = false) }
             item("Remove Empty Lines (Containing Blank characters)") { EditOps.removeEmptyLines(editor, includeBlank = true) }
+            item("Insert Blank Line Above Current") { EditOps.insertBlankLine(editor, above = true) }
+            item("Insert Blank Line Below Current") { EditOps.insertBlankLine(editor, above = false) }
             item("Reverse Line Order") { EditOps.reverseLines(editor) }
-            item("Sort Lines Lexicographically Ascending") { EditOps.sortLines(editor, descending = false) }
-            item("Sort Lines Lexicographically Descending") { EditOps.sortLines(editor, descending = true) }
+            item("Randomize Line Order") { EditOps.shuffleLines(editor) }
+            val sorts = listOf(
+                "Lexicographically" to TextTransforms.Sort.LEXICOGRAPHIC,
+                "Lex. %s Ignoring Case" to TextTransforms.Sort.IGNORE_CASE,
+                "In Locale Order" to TextTransforms.Sort.LOCALE,
+                "As Integers" to TextTransforms.Sort.INTEGER,
+                "As Decimals (Comma)" to TextTransforms.Sort.DECIMAL_COMMA,
+                "As Decimals (Dot)" to TextTransforms.Sort.DECIMAL_DOT,
+                "By Length" to TextTransforms.Sort.LENGTH,
+            )
+            for (descending in listOf(false, true)) {
+                val direction = if (descending) "Descending" else "Ascending"
+                for ((label, kind) in sorts) {
+                    val name = if ("%s" in label) "Sort Lines ${label.format(direction)}" else "Sort Lines $label $direction"
+                    item(name) { EditOps.sortLines(editor, descending, kind) }
+                }
+            }
         }
         sub("Comment/Uncomment") {
-            item("Toggle Single Line Comment") {
-                if (!EditOps.toggleLineComment(editor, workspace.active.language.commentLine)) {
-                    toast("${workspace.active.language.display} has no single line comment")
-                }
+            fun needsMarker(done: Boolean, what: String) {
+                if (!done) toast("${language.display} has no $what")
+            }
+            item("Toggle Single Line Comment") { needsMarker(EditOps.toggleLineComment(editor, language.commentLine), "single line comment") }
+            item("Single Line Comment") { needsMarker(EditOps.setLineComment(editor, language.commentLine, comment = true), "single line comment") }
+            item("Single Line Uncomment") { needsMarker(EditOps.setLineComment(editor, language.commentLine, comment = false), "single line comment") }
+            item("Block Comment") {
+                if (language.commentStart.isEmpty()) toast("${language.display} has no block comment")
+                else if (!EditOps.streamComment(editor, language.commentStart, language.commentEnd)) toast("Select some text first")
+            }
+            item("Block Uncomment") {
+                if (!EditOps.streamUncomment(editor, language.commentStart, language.commentEnd)) toast("Select a whole block comment first")
             }
         }
         sub("EOL Conversion") { eolItems() }
         sub("Blank Operations") {
             item("Trim Trailing Space") { EditOps.trimTrailingSpace(editor) }
+            item("Trim Leading Space") { EditOps.mapLines(editor) { TextTransforms.trimLeading(it) } }
+            item("Trim Leading and Trailing Space") { EditOps.mapLines(editor) { TextTransforms.trimBoth(it) } }
+            item("EOL to Space") { EditOps.eolToSpace(editor, trim = false) }
+            item("Trim both and EOL to Space") { EditOps.eolToSpace(editor, trim = true) }
+            item("TAB to Space") { EditOps.tabsToSpaces(editor) }
+            item("Space to TAB (All)") { EditOps.spacesToTabs(editor, leadingOnly = false) }
+            item("Space to TAB (Leading)") { EditOps.spacesToTabs(editor, leadingOnly = true) }
         }
+        sub("On Selection") {
+            item("Search on Internet") { searchOnInternet() }
+        }
+        sub("Multi-select All") {
+            item("Ignore Case & Whole Word") { EditOps.multiSelectAll(editor, matchCase = false, wholeWord = false) }
+            item("Match Case Only") { EditOps.multiSelectAll(editor, matchCase = true, wholeWord = false) }
+            item("Match Whole Word Only") { EditOps.multiSelectAll(editor, matchCase = false, wholeWord = true) }
+            item("Match Case & Whole Word") { EditOps.multiSelectAll(editor, matchCase = true, wholeWord = true) }
+        }
+        sub("Multi-select Next") {
+            item("Ignore Case & Whole Word") { multiSelectNext(matchCase = false, wholeWord = false) }
+            item("Match Case Only") { multiSelectNext(matchCase = true, wholeWord = false) }
+            item("Match Whole Word Only") { multiSelectNext(matchCase = false, wholeWord = true) }
+            item("Match Case & Whole Word") { multiSelectNext(matchCase = true, wholeWord = true) }
+        }
+        item("Undo the Latest Added Multi-Select") { EditOps.multiSelectUndo(editor) }
+        item("Skip Current & Go to Next Multi-select") { EditOps.multiSelectSkip(editor, lastMultiSelect.first, lastMultiSelect.second) }
         item("Read-Only", checked = readOnly) { editor.send(Sci.SCI_SETREADONLY, if (readOnly) 0 else 1) }
     }
 
@@ -658,9 +707,16 @@ class MainActivity : Activity() {
         item("Find...") { findBar.open(withReplace = false) }
         item("Find Next") { findBar.find(forward = true) }
         item("Find Previous") { findBar.find(forward = false) }
+        item("Select and Find Next") { findBar.findSelection(forward = true, remember = true) }
+        item("Select and Find Previous") { findBar.findSelection(forward = false, remember = true) }
+        item("Find (Volatile) Next") { findBar.findSelection(forward = true, remember = false) }
+        item("Find (Volatile) Previous") { findBar.findSelection(forward = false, remember = false) }
         item("Replace...") { findBar.open(withReplace = true) }
         item("Go to...") { goToLine() }
         item("Go to Matching Brace") { EditOps.goToMatchingBrace(editor) }
+        item("Select All In-between {} [] or ()") {
+            if (!EditOps.selectBetweenBraces(editor)) toast("Put the caret next to a brace first")
+        }
         sub("Bookmark") {
             item("Toggle Bookmark") { toggleBookmark() }
             item("Next Bookmark") { goToBookmark(forward = true) }
@@ -671,15 +727,15 @@ class MainActivity : Activity() {
 
     private fun MenuSpec.viewMenu() {
         val wrapped = editor.send(Sci.SCI_GETWRAPMODE).toInt() != Sci.SC_WRAP_NONE
-        val whitespace = editor.send(Sci.SCI_GETVIEWWS).toInt() != Sci.SCWS_INVISIBLE
-        val eol = editor.send(Sci.SCI_GETVIEWEOL) != 0L
-        val guides = editor.send(Sci.SCI_GETINDENTATIONGUIDES).toInt() != Sci.SC_IV_NONE
-        val wrapSymbol = editor.send(Sci.SCI_GETWRAPVISUALFLAGS).toInt() != Sci.SC_WRAPVISUALFLAG_NONE
         item("Word wrap", checked = wrapped) {
             editor.send(Sci.SCI_SETWRAPMODE, (if (wrapped) Sci.SC_WRAP_NONE else Sci.SC_WRAP_WORD).toLong())
             prefs.edit().putBoolean("wrap", !wrapped).apply()
         }
         sub("Show Symbol") {
+            val whitespace = editor.send(Sci.SCI_GETVIEWWS).toInt() != Sci.SCWS_INVISIBLE
+            val eol = editor.send(Sci.SCI_GETVIEWEOL) != 0L
+            val guides = editor.send(Sci.SCI_GETINDENTATIONGUIDES).toInt() != Sci.SC_IV_NONE
+            val wrapSymbol = editor.send(Sci.SCI_GETWRAPVISUALFLAGS).toInt() != Sci.SC_WRAPVISUALFLAG_NONE
             fun showWhitespace(on: Boolean) = editor.send(Sci.SCI_SETVIEWWS, (if (on) Sci.SCWS_VISIBLEALWAYS else Sci.SCWS_INVISIBLE).toLong())
             item("Show Space and Tab", checked = whitespace) { showWhitespace(!whitespace) }
             item("Show End of Line", checked = eol) { editor.send(Sci.SCI_SETVIEWEOL, if (eol) 0 else 1) }
@@ -698,8 +754,28 @@ class MainActivity : Activity() {
             item("Zoom Out") { zoom { editor.send(Sci.SCI_ZOOMOUT) } }
             item("Restore Default Zoom") { zoom { editor.send(Sci.SCI_SETZOOM, 0) } }
         }
+        sub("Tab") {
+            val docs = workspace.docs
+            val index = docs.indexOf(workspace.active)
+            item("First Tab") { workspace.activate(docs.first()) }
+            item("Last Tab") { workspace.activate(docs.last()) }
+            item("Next Tab") { workspace.activate(docs[(index + 1) % docs.size]) }
+            item("Previous Tab") { workspace.activate(docs[(index + docs.size - 1) % docs.size]) }
+            item("Move to Start") { workspace.move(workspace.active, 0) }
+            item("Move to End") { workspace.move(workspace.active, docs.size - 1) }
+            item("Move Tab Forward", enabled = index < docs.size - 1) { workspace.move(workspace.active, index + 1) }
+            item("Move Tab Backward", enabled = index > 0) { workspace.move(workspace.active, index - 1) }
+        }
         item("Fold All") { editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_CONTRACT.toLong()) }
         item("Unfold All") { editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_EXPAND.toLong()) }
+        item("Fold Current Level") { EditOps.foldCurrent(editor, collapse = true) }
+        item("Unfold Current Level") { EditOps.foldCurrent(editor, collapse = false) }
+        sub("Fold Level") {
+            for (level in 1..8) item(level.toString()) { EditOps.foldLevel(editor, level, collapse = true) }
+        }
+        sub("Unfold Level") {
+            for (level in 1..8) item(level.toString()) { EditOps.foldLevel(editor, level, collapse = false) }
+        }
         item("Summary...") { showSummary() }
     }
 
@@ -713,7 +789,27 @@ class MainActivity : Activity() {
         for (encoding in TextEncodings.unicode) {
             item(encoding.label, checked = encoding == current) { workspace.setEncoding(encoding) }
         }
-        item("Character sets...") { chooseCharacterSet() }
+        // Notepad++'s Character sets: re-read the file as that character set.
+        sub("Character sets") {
+            for ((group, sets) in TextEncodings.characterSets.filter { it.isSupported }.groupBy { it.group ?: "" }) {
+                sub(group) {
+                    for (set in sets) {
+                        item(set.label, checked = set == current) {
+                            if (workspace.active.uri != null) reloadFromDisk(set) else workspace.setEncoding(set)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun MenuSpec.languageMenu() {
+        val current = workspace.active.language
+        val normal = workspace.languages.normal
+        item("None (Normal Text)", checked = current === normal) { workspace.setLanguage(normal) }
+        for (language in workspace.languages.menu) {
+            item(language.display, checked = language === current) { workspace.setLanguage(language) }
+        }
     }
 
     private fun MenuSpec.settingsMenu() {
@@ -740,11 +836,7 @@ class MainActivity : Activity() {
         workspace.restyle()
     }
 
-    private fun showEolMenu(anchor: View) = showMenu(anchor) { eolItems() }
-
-    private fun showEncodingMenu(anchor: View) = showMenu(anchor) { encodingMenu() }
-
-    private fun showTabMenu(doc: Doc, anchor: View) = showMenu(anchor) {
+    private fun showTabMenu(doc: Doc) = showMenu(doc.name) {
         val index = workspace.docs.indexOf(doc)
         item("Close") { requestClose(doc) }
         item("Close All but This") { closeMany(workspace.docs.filter { it !== doc }) }
@@ -760,31 +852,59 @@ class MainActivity : Activity() {
 
     // region Dialogs and commands
 
-    private fun chooseLanguage() {
-        val languages = listOf(workspace.languages.normal) + workspace.languages.menu
-        val labels = languages.map { if (it === workspace.languages.normal) "None (Normal Text)" else it.display }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("Language")
-            .setSingleChoiceItems(labels, languages.indexOf(workspace.active.language)) { dialog, which ->
-                workspace.setLanguage(languages[which])
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+    private var beginSelect: Long? = null
+    private var lastMultiSelect = false to false
+
+    /** Begin/End Select: the first use marks a position, the second selects from there to the caret. */
+    private fun beginEndSelect(column: Boolean) {
+        val start = beginSelect
+        val caret = editor.send(Sci.SCI_GETCURRENTPOS)
+        if (start == null) {
+            beginSelect = caret
+            toast("Selection start marked. Move the caret and choose this command again.")
+            return
+        }
+        beginSelect = null
+        val anchor = start.coerceIn(0, editor.send(Sci.SCI_GETLENGTH))
+        if (column) {
+            editor.send(Sci.SCI_SETRECTANGULARSELECTIONANCHOR, anchor)
+            editor.send(Sci.SCI_SETRECTANGULARSELECTIONCARET, caret)
+        } else {
+            editor.send(Sci.SCI_SETSEL, anchor, caret)
+        }
     }
 
-    /** Notepad++'s Encoding > Character sets: re-read the file as that character set. */
-    private fun chooseCharacterSet() {
-        val sets = TextEncodings.characterSets.filter { it.isSupported }
-        val labels = sets.map { "${it.group}: ${it.label}" }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("Character sets")
-            .setSingleChoiceItems(labels, sets.indexOf(workspace.active.encoding)) { dialog, which ->
-                dialog.dismiss()
-                if (workspace.active.uri != null) reloadFromDisk(sets[which]) else workspace.setEncoding(sets[which])
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+    private fun multiSelectNext(matchCase: Boolean, wholeWord: Boolean) {
+        lastMultiSelect = matchCase to wholeWord
+        EditOps.multiSelectNext(editor, matchCase, wholeWord)
+    }
+
+    private fun insertDateTime(dateStyle: Int) {
+        val now = java.util.Date()
+        val text = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(now) + " " +
+            java.text.DateFormat.getDateInstance(dateStyle).format(now)
+        editor.typeText(text)
+    }
+
+    private fun searchOnInternet() {
+        val query = EditOps.selectionOrWord(editor).trim()
+        if (query.isEmpty()) return toast("Select some text first")
+        try {
+            startActivity(Intent(Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, query))
+        } catch (e: Exception) {
+            toast("No app can search the web")
+        }
+    }
+
+    /** Recently closed files, newest first, as kept in the settings. */
+    private fun recentFiles(): List<Pair<Uri, String>> =
+        (prefs.getString("recent", "") ?: "").split('\n').filter { '\t' in it }
+            .map { Uri.parse(it.substringBefore('\t')) to it.substringAfter('\t') }
+
+    private fun rememberRecent(doc: Doc) {
+        val uri = doc.uri ?: return
+        val entries = listOf(uri to doc.name) + recentFiles().filter { it.first != uri }
+        prefs.edit().putString("recent", entries.take(MAX_RECENT).joinToString("\n") { "${it.first}\t${it.second}" }).apply()
     }
 
     private fun goToLine() {
@@ -860,6 +980,7 @@ class MainActivity : Activity() {
     private companion object {
         const val REQUEST_OPEN = 1
         const val REQUEST_SAVE_AS = 2
+        const val MAX_RECENT = 10
         const val CHROME = 0xFFEFEFEF.toInt()
     }
 }

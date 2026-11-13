@@ -14,6 +14,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ToggleButton
+import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.SciApi
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
 import io.github.revelationnow.pocketpadpp.core.Searcher
@@ -151,6 +152,18 @@ class FindBar(context: Context, private val editor: SciApi) : LinearLayout(conte
             result.wrapped -> say("Found the 1st occurrence from the bottom. The beginning of the document has been reached.", END_REACHED)
             else -> say("")
         }
+    }
+
+    /**
+     * Select and Find Next / Find (Volatile) Next: searches for the selection or the word at the caret.
+     * With [remember] the text also becomes the find field's content.
+     */
+    fun findSelection(forward: Boolean, remember: Boolean) {
+        val text = EditOps.selectionOrWord(editor)
+        if (text.isEmpty() || '\n' in text || '\r' in text) return
+        if (remember) findField.setText(text)
+        val result = Searcher.find(editor, text, SearchOptions(matchCase.isChecked, wholeWord.isChecked, regex = false, wrapAround = true), forward)
+        if (!result.found && isOpen) say("Can't find the text \"$text\"", NOT_FOUND)
     }
 
     private fun replace() {

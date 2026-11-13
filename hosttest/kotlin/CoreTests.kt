@@ -138,6 +138,18 @@ private fun testLanguages(assets: File): Pair<LanguageRegistry, NppTheme> {
         language.kind != "text" && theme.lexerStyles(styledAs).isEmpty()
     }
     eq(emptyList<String>(), withoutStyles.map { it.name }, "every language has styles in the theme")
+    // Every bundled Notepad++ theme must load and say whether it is dark.
+    val themes = File(assets, "themes").listFiles { f -> f.name.endsWith(".xml") }!!.sortedBy { it.name }
+    ok(themes.size >= 20, "bundled themes found: ${themes.size}")
+    val dark = ArrayList<String>()
+    for (file in themes) {
+        val loaded = file.inputStream().use { NppTheme.load(it) }
+        ok(loaded.global("Default Style")?.bg != null, "${file.name} has a default background")
+        ok(loaded.lexerStyles("cpp").isNotEmpty(), "${file.name} styles C++")
+        if (loaded.isDark) dark += file.name.removeSuffix(".xml")
+    }
+    ok(!theme.isDark, "the default theme is light")
+    ok("DarkModeDefault" in dark && "Obsidian" in dark && "Solarized-light" !in dark, "dark themes are recognised: $dark")
     return registry to theme
 }
 
