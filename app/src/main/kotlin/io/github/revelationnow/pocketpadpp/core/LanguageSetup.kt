@@ -265,6 +265,7 @@ object ThemeApplier {
             Sci.SCI_SETAUTOMATICFOLD,
             (Sci.SC_AUTOMATICFOLD_SHOW or Sci.SC_AUTOMATICFOLD_CLICK or Sci.SC_AUTOMATICFOLD_CHANGE).toLong(),
         )
+        Marks.setup(sci, theme)
         // The bookmark margin is hidden, so a bookmark shows as a tint on its line that works on any theme.
         sci.send(Sci.SCI_MARKERDEFINE, BOOKMARK_MARKER.toLong(), Sci.SC_MARK_BOOKMARK.toLong())
         sci.send(Sci.SCI_MARKERSETFORE, BOOKMARK_MARKER.toLong(), sciColour(0x2020A0))

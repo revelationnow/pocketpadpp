@@ -15,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ToggleButton
 import io.github.revelationnow.pocketpadpp.core.EditOps
+import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.SciApi
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
 import io.github.revelationnow.pocketpadpp.core.Searcher
@@ -31,6 +32,11 @@ class FindBar(context: Context, private val editor: SciApi, private val palette:
     private val findField = field("Find")
     private val replaceField = field("Replace with")
     private val replaceRow = LinearLayout(context)
+    private val markRow = LinearLayout(context)
+    private val bookmarkLines = toggle("Bookmark line", "Bookmark line")
+
+    // Incremental search: where the caret was when it started, or -1 when the bar is in another mode.
+    private var incrementalFrom = -1L
     private val status = TextView(context)
     private val matchCase = toggle("Aa", "Match case")
     private val wholeWord = toggle("W", "Match whole word only")
@@ -92,6 +98,12 @@ class FindBar(context: Context, private val editor: SciApi, private val palette:
         replaceRow.addView(button("All", "Replace all") { replaceAll() })
         addView(replaceRow)
 
+        markRow.gravity = Gravity.CENTER_VERTICAL
+        markRow.addView(bookmarkLines, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        markRow.addView(button("Mark All", "Mark all") { markAll() })
+        markRow.addView(button("Clear all marks", "Clear all marks") { clearMarks() })
+        addView(markRow)
+
         val optionsRow = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         for (option in listOf(matchCase, wholeWord, regex, wrap)) {
             optionsRow.addView(option, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -104,10 +116,19 @@ class FindBar(context: Context, private val editor: SciApi, private val palette:
         addView(optionsRow)
 
         findField.setOnEditorActionListener { _, _, _ -> find(forward = true); true }
+        findField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) = searchAsTyped()
+        })
         replaceField.setOnEditorActionListener { _, _, _ -> replace(); true }
     }
 
     val isOpen: Boolean get() = visibility == View.VISIBLE
+
+    /** The Match case and whole word switches, which Search > Mark All also goes by, as in Notepad++. */
+    val matchCaseOn: Boolean get() = matchCase.isChecked
+    val wholeWordOn: Boolean get() = wholeWord.isChecked
 
     private fun options() = SearchOptions(matchCase.isChecked, wholeWord.isChecked, regex.isChecked, wrap.isChecked)
 
@@ -117,23 +138,62 @@ class FindBar(context: Context, private val editor: SciApi, private val palette:
     }
 
     /** Opens the bar, seeding the find field with the selection when it is a short single line. */
-    fun open(withReplace: Boolean) {
-        replaceRow.visibility = if (withReplace) View.VISIBLE else View.GONE
+    fun open(withReplace: Boolean) = show(withReplace, mark = false, incremental = false)
+
+    /** Search > Mark: highlights everything the search finds, and can bookmark those lines. */
+    fun openMark() = show(replace = false, mark = true, incremental = false)
+
+    /** Search > Incremental Search: finds from where the caret was while the text is being typed. */
+    fun openIncremental() = show(replace = false, mark = false, incremental = true)
+
+    private fun show(replace: Boolean, mark: Boolean, incremental: Boolean) {
+        incrementalFrom = -1
+        replaceRow.visibility = if (replace) View.VISIBLE else View.GONE
+        markRow.visibility = if (mark) View.VISIBLE else View.GONE
         val start = editor.send(Sci.SCI_GETSELECTIONSTART)
         val end = editor.send(Sci.SCI_GETSELECTIONEND)
         if (end > start && end - start <= 200) {
             val selected = String(editor.range(start, end), Charsets.UTF_8)
             if ('\n' !in selected && '\r' !in selected) findField.setText(selected)
         }
-        say("")
+        say(if (incremental) "Incremental search: type to find." else "")
+        if (incremental) incrementalFrom = start
         visibility = View.VISIBLE
         findField.requestFocus()
         findField.selectAll()
         (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(findField, 0)
     }
 
+    private fun searchAsTyped() {
+        if (incrementalFrom < 0 || !isOpen) return
+        val from = incrementalFrom.coerceAtMost(editor.send(Sci.SCI_GETLENGTH))
+        editor.send(Sci.SCI_SETEMPTYSELECTION, from)
+        val text = findField.text.toString()
+        if (text.isEmpty()) {
+            say("Incremental search: type to find.")
+            return
+        }
+        // Always from where the caret was when the search began, so that a longer text refines the same match.
+        val result = Searcher.find(editor, text, options(), forward = true)
+        if (!result.found) say("Can't find the text \"$text\"", palette.findNotFound) else say(if (result.wrapped) "Wrapped to the top." else "")
+    }
+
+    private fun markAll() {
+        val text = findField.text.toString()
+        if (text.isEmpty()) return
+        val count = Marks.markAll(editor, Marks.FOUND, text, options(), bookmarkLines.isChecked)
+        say(if (count == 1) "Mark: 1 match." else "Mark: $count matches.")
+    }
+
+    private fun clearMarks() {
+        Marks.clear(editor, Marks.FOUND)
+        if (bookmarkLines.isChecked) editor.send(Sci.SCI_MARKERDELETEALL, io.github.revelationnow.pocketpadpp.core.ThemeApplier.BOOKMARK_MARKER.toLong())
+        say("Marks cleared.")
+    }
+
     fun close() {
         if (!isOpen) return
+        incrementalFrom = -1
         visibility = View.GONE
         onClose?.invoke()
     }

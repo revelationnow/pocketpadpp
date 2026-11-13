@@ -18,6 +18,7 @@ import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
+import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.editor.ScintillaView
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import org.junit.After
@@ -1283,6 +1284,73 @@ class WalkthroughTest {
         assertEquals("09abXYfgh\n10abXYfgh\n11abXY\n12abXYfgh\n13", text())
         sci(Sci.SCI_UNDO)
         assertEquals("the Column Editor is one undo step", "abXYfgh\nabXYfgh\nabXY\nabXYfgh\n", text())
+    }
+
+    @Test
+    fun marksAndIncrementalSearch() {
+        fun marks(style: Int) = onUi { Marks.ranges(it.editor, style).size }
+        fun clipboard() = onUi { it.editor.getClipboard() }
+        setText("cat dog cat\nbird\ncat\n")
+
+        // Mark All puts a highlight on every occurrence of the word at the caret.
+        sci(Sci.SCI_GOTOPOS, 1)
+        openMenu("Search", "Mark All", "Using 1st Style")
+        assertEquals("every cat is marked", 3, marks(1))
+        sci(Sci.SCI_SETSEL, 4, 7)
+        openMenu("Search", "Mark One", "Using 2nd Style")
+        assertEquals(1, marks(2))
+        sci(Sci.SCI_GOTOPOS, 0)
+        shot("marks")
+        openMenu("Search", "Jump Down", "1st Style")
+        assertEquals("jump down goes to the next mark", 8L, sci(Sci.SCI_GETCURRENTPOS))
+        openMenu("Search", "Jump Up", "1st Style")
+        assertEquals("jump up goes back", 0L, sci(Sci.SCI_GETCURRENTPOS))
+        openMenu("Search", "Copy Styled Text", "All Styles")
+        assertEquals("cat\ndog\ncat\ncat", clipboard())
+        openMenu("Search", "Unmark All", "Clear 2nd Style")
+        assertEquals(3 to 0, marks(1) to marks(2))
+        openMenu("Search", "Unmark All", "Clear all Styles")
+        assertEquals(0, marks(1))
+
+        // Search > Mark highlights what a search finds and can bookmark the lines.
+        openMenu("Search", "Mark...")
+        device.findObjects(By.clazz("android.widget.EditText"))[0].text = "c.t"
+        tapDescribed("Regular expression")
+        tapDescribed("Bookmark line")
+        tapDescribed("Mark all")
+        assertTrue(onScreen("Mark: 3 matches."))
+        assertEquals(3, marks(Marks.FOUND))
+        shot("mark-bar")
+        openMenu("Search", "Bookmark", "Copy Bookmarked Lines")
+        assertEquals("the lines of the matches were bookmarked", "cat dog cat\ncat\n", clipboard())
+        tapDescribed("Clear all marks")
+        assertEquals(0, marks(Marks.FOUND))
+        tapDescribed("Regular expression")
+        tapDescribed("Close")
+
+        // Bookmarked lines as a group.
+        sci(Sci.SCI_GOTOPOS, 12)
+        openMenu("Search", "Bookmark", "Toggle Bookmark")
+        openMenu("Search", "Bookmark", "Inverse Bookmark")
+        openMenu("Search", "Bookmark", "Remove Bookmarked Lines")
+        assertEquals("only the line that was bookmarked first is left", "bird\n", text())
+        sci(Sci.SCI_UNDO)
+        assertEquals("cat dog cat\nbird\ncat\n", text())
+
+        // Incremental search follows the typing.
+        sci(Sci.SCI_GOTOPOS, 0)
+        openMenu("Search", "Incremental Search")
+        val field = device.findObjects(By.clazz("android.widget.EditText"))[0]
+        field.text = "d"
+        waitUntil("the first match") { selection() == "4-5" }
+        field.text = "do"
+        waitUntil("the longer match at the same place") { selection() == "4-6" }
+        field.text = "bi"
+        waitUntil("another word") { selection() == "12-14" }
+        shot("incremental-search")
+        field.text = "zzz"
+        assertTrue(onScreen("Can't find the text \"zzz\""))
+        tapDescribed("Close")
     }
 
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */

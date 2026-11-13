@@ -120,17 +120,26 @@ object Searcher {
         return count
     }
 
-    fun count(sci: SciApi, text: String, options: SearchOptions): Int {
+    fun count(sci: SciApi, text: String, options: SearchOptions): Int = forEachMatch(sci, text, options) { _, _ -> }
+
+    /**
+     * Calls [action] with the start and end of every match in the document, top to bottom, and returns how
+     * many there were. The action may style or mark the text but must not change it.
+     */
+    fun forEachMatch(sci: SciApi, text: String, options: SearchOptions, action: (Long, Long) -> Unit): Int {
         if (text.isEmpty()) return 0
         val needle = text.toByteArray(Charsets.UTF_8)
         val length = sci.send(Sci.SCI_GETLENGTH)
-        sci.send(Sci.SCI_SETSEARCHFLAGS, options.flags.toLong())
         var count = 0
         var position = 0L
-        while (count < MAX_MATCHES && position <= length && searchIn(sci, needle, position, length) >= 0) {
+        while (count < MAX_MATCHES && position <= length) {
+            // Set every time round: the action may have used the search flags or the target itself.
+            sci.send(Sci.SCI_SETSEARCHFLAGS, options.flags.toLong())
+            if (searchIn(sci, needle, position, length) < 0) break
             count++
             val start = sci.send(Sci.SCI_GETTARGETSTART)
             val end = sci.send(Sci.SCI_GETTARGETEND)
+            action(start, end)
             position = if (end > start) end else sci.send(Sci.SCI_POSITIONAFTER, end).also { if (it == end) return count }
         }
         return count

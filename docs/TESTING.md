@@ -22,6 +22,8 @@ and saves a screenshot at every step. It covers:
 - tabs: new, switch, move, close, the tab's own menu, the save prompt, session restore
 - files: opening, encodings and line endings kept on save, converting both
 - find, count, replace all with a regular expression, single undo
+- marks in Notepad++'s five styles, Search > Mark with bookmarked lines, the bookmarked-line commands,
+  and incremental search
 - touch: drag scrolling, fling, tap, double tap, long press, selection handles, pinch zoom, the scroll thumb
 - the on-screen Ctrl, Alt and Shift keys: one-shot and locked, Notepad++'s shortcuts, Alt + letter for menus,
   shortcuts while a suggestion keyboard is composing a word or typing over a selection, and a shortcut

@@ -4,6 +4,7 @@ import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.LanguageSetup
+import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.SciApi
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
@@ -505,6 +506,53 @@ private fun testMoreEditOps() {
     sci.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_EXPAND.toLong())
     sci.send(Sci.SCI_RELEASEDOCUMENT, 0, firstDoc)
     sci.send(Sci.SCI_RELEASEDOCUMENT, 0, secondDoc)
+
+    // Marks and bookmarked lines
+    val marker = ThemeApplier.BOOKMARK_MARKER.toLong()
+    sci.setLexer("")
+    sci.text = "cat dog cat\nbird\ncat\n"
+    eq(3, Marks.markAll(sci, 1, "cat", SearchOptions()), "mark all occurrences")
+    eq(listOf(0L to 3L, 8L to 11L, 17L to 20L), Marks.ranges(sci, 1), "marked ranges")
+    eq(3, Searcher.count(sci, "cat", SearchOptions()), "counting still works after marking")
+    sci.send(Sci.SCI_GOTOPOS, 0)
+    ok(Marks.jump(sci, 1, forward = true), "jump down")
+    eq(8L, sci.send(Sci.SCI_GETCURRENTPOS), "to the next mark")
+    Marks.jump(sci, 1, forward = true)
+    Marks.jump(sci, 1, forward = true)
+    eq(0L, sci.send(Sci.SCI_GETCURRENTPOS), "jump down wraps to the first mark")
+    Marks.jump(sci, 1, forward = false)
+    eq(17L, sci.send(Sci.SCI_GETCURRENTPOS), "jump up wraps to the last mark")
+    Marks.jump(sci, 1, forward = false)
+    eq(8L, sci.send(Sci.SCI_GETCURRENTPOS), "jump up goes to the mark before")
+    ok(!Marks.jump(sci, 4, forward = true), "no marks in another style")
+    eq("cat\ncat\ncat", Marks.text(sci, listOf(1)), "copy styled text")
+    sci.send(Sci.SCI_SETSEL, 4, 7)
+    ok(Marks.markRange(sci, 2), "mark one")
+    eq("cat\ndog\ncat\ncat", Marks.text(sci, listOf(1, 2)), "all styles, in document order")
+    Marks.clear(sci, 1)
+    eq(0 to 1, Marks.ranges(sci, 1).size to Marks.ranges(sci, 2).size, "clear one style")
+    Marks.clearAllStyles(sci)
+    eq(0, Marks.ranges(sci, 2).size, "clear all styles")
+    sci.send(Sci.SCI_GOTOPOS, 5)
+    eq(1 to "dog", Marks.markSelection(sci, 3, matchCase = true, wholeWord = true) to Marks.text(sci, listOf(3)), "mark the word at the caret")
+    sci.send(Sci.SCI_GOTOPOS, 12)
+    eq(0, Marks.markSelection(sci, 3, matchCase = false, wholeWord = false).coerceAtMost(0), "marking again is harmless")
+    eq(1, Marks.markAll(sci, Marks.FOUND, "b.rd", SearchOptions(regex = true), bookmarkLines = true), "mark with a regular expression")
+    ok(sci.send(Sci.SCI_MARKERGET, 1) and (1L shl ThemeApplier.BOOKMARK_MARKER) != 0L, "and bookmark its line")
+    sci.send(Sci.SCI_MARKERADD, 2, marker)
+    eq("bird\ncat\n", Marks.bookmarkedText(sci), "copy bookmarked lines")
+    Marks.invertBookmarks(sci)
+    eq("cat dog cat\n\n", Marks.bookmarkedText(sci), "inverse bookmark")
+    Marks.invertBookmarks(sci)
+    eq(2, Marks.replaceBookmarked(sci, "X"), "paste to bookmarked lines")
+    eq("cat dog cat\nX\nX\n", sci.text, "bookmarked lines replaced")
+    eq(2, Marks.removeLines(sci, bookmarkedOnes = true), "remove bookmarked lines")
+    eq("cat dog cat\n", sci.text, "only the other line is left")
+    sci.text = "a\nb\nc\n"
+    sci.send(Sci.SCI_MARKERADD, 1, marker)
+    eq(2, Marks.removeLines(sci, bookmarkedOnes = false), "remove non-bookmarked lines")
+    eq("b\n", sci.text, "only the bookmarked line is left")
+    sci.send(Sci.SCI_MARKERDELETEALL, marker)
 
     // Column Editor
     eq(listOf("1", "1", "3", "3", "5"), TextTransforms.columnNumbers(5, 1, 2, 2, 10, TextTransforms.Leading.NONE), "numbers with increase and repeat")

@@ -40,6 +40,7 @@ import io.github.revelationnow.pocketpadpp.app.Workspace
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
+import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
 import io.github.revelationnow.pocketpadpp.core.TextEncodings
@@ -921,6 +922,8 @@ class MainActivity : Activity() {
         item("Find (Volatile) Next") { findBar.findSelection(forward = true, remember = false) }
         item("Find (Volatile) Previous") { findBar.findSelection(forward = false, remember = false) }
         item("Replace...") { findBar.open(withReplace = true) }
+        item("Incremental Search") { findBar.openIncremental() }
+        item("Mark...") { findBar.openMark() }
         item("Go to...") { goToLine() }
         item("Go to Matching Brace") { EditOps.goToMatchingBrace(editor) }
         item("Select All In-between {} [] or ()") {
@@ -931,6 +934,52 @@ class MainActivity : Activity() {
             item("Next Bookmark") { goToBookmark(forward = true) }
             item("Previous Bookmark") { goToBookmark(forward = false) }
             item("Clear All Bookmarks") { editor.send(Sci.SCI_MARKERDELETEALL, ThemeApplier.BOOKMARK_MARKER.toLong()) }
+            item("Cut Bookmarked Lines") {
+                editor.setClipboard(Marks.bookmarkedText(editor))
+                Marks.removeLines(editor, bookmarkedOnes = true)
+            }
+            item("Copy Bookmarked Lines") { editor.setClipboard(Marks.bookmarkedText(editor)) }
+            item("Paste to (Replace) Bookmarked Lines") {
+                Marks.replaceBookmarked(editor, editor.getClipboard().removeSuffix("\n").removeSuffix("\r"))
+            }
+            item("Remove Bookmarked Lines") { Marks.removeLines(editor, bookmarkedOnes = true) }
+            item("Remove Non-Bookmarked Lines") { Marks.removeLines(editor, bookmarkedOnes = false) }
+            item("Inverse Bookmark") { Marks.invertBookmarks(editor) }
+        }
+        // Notepad++'s five highlight styles, plus the one Search > Mark uses.
+        val ordinals = listOf("1st", "2nd", "3rd", "4th", "5th")
+        sub("Mark All") {
+            for (style in Marks.STYLES) {
+                item("Using ${ordinals[style - 1]} Style") {
+                    if (Marks.markSelection(editor, style, findBar.matchCaseOn, findBar.wholeWordOn) == 0) {
+                        toast("Select some text or put the caret in a word first")
+                    }
+                }
+            }
+        }
+        sub("Mark One") {
+            for (style in Marks.STYLES) {
+                item("Using ${ordinals[style - 1]} Style") {
+                    if (!Marks.markRange(editor, style)) toast("Select some text first")
+                }
+            }
+        }
+        sub("Unmark All") {
+            for (style in Marks.STYLES) item("Clear ${ordinals[style - 1]} Style") { Marks.clear(editor, style) }
+            item("Clear all Styles") { Marks.clearAllStyles(editor) }
+        }
+        for (forward in listOf(false, true)) {
+            sub(if (forward) "Jump Down" else "Jump Up") {
+                for (style in Marks.STYLES) {
+                    item("${ordinals[style - 1]} Style") { if (!Marks.jump(editor, style, forward)) toast("Nothing is marked in this style") }
+                }
+                item("Find Mark Style") { if (!Marks.jump(editor, Marks.FOUND, forward)) toast("Nothing is marked in this style") }
+            }
+        }
+        sub("Copy Styled Text") {
+            for (style in Marks.STYLES) item("${ordinals[style - 1]} Style") { editor.setClipboard(Marks.text(editor, listOf(style))) }
+            item("All Styles") { editor.setClipboard(Marks.text(editor, Marks.STYLES.toList())) }
+            item("Find Mark Style") { editor.setClipboard(Marks.text(editor, listOf(Marks.FOUND))) }
         }
     }
 
