@@ -223,13 +223,28 @@ class ScintillaView @JvmOverloads constructor(
      */
     internal fun typedWithSoftModifiers(text: CharSequence, composing: Boolean): Boolean {
         val modifiers = softModifiers
-        if (modifiers == 0) return false
-        if (modifiers and (Sci.SCMOD_CTRL or Sci.SCMOD_ALT) == 0 || text.length != 1) {
-            // Shift alone, or more than one character: ordinary typing, which still uses up a one-shot key.
+        if (modifiers == 0 || ptr == 0L) return false
+        var typed: Char? = null
+        if (modifiers and (Sci.SCMOD_CTRL or Sci.SCMOD_ALT) != 0) {
+            if (!composing) {
+                if (text.length == 1) typed = text[0]
+            } else {
+                // With suggestions on, the keyboard sends the whole word it is composing on every key press,
+                // and after a paste or a tap it adopts the word next to the caret. The key just pressed is the
+                // one character added to the end of that word.
+                ScintillaNative.imeState(ptr, imeState)
+                val composed = if (imeState[2] >= 0) imeState[3] - imeState[2] else 0
+                if (text.length == composed + 1) typed = text[text.length - 1]
+            }
+        }
+        if (typed == null) {
+            // Shift alone, or text that is not a single key press: ordinary typing, which still uses up a one-shot key.
             if (!composing) onSoftModifiersUsed?.invoke()
             return false
         }
-        val ch = text[0]
+        // The word being composed stays as it is; the shortcut must not act on a half-finished composition.
+        if (composing) ScintillaNative.imeFinishComposing(ptr)
+        val ch: Char = typed
         val key = when {
             ch.isLetter() -> ch.uppercaseChar().code
             ch == '+' || ch == '=' -> Sci.SCK_ADD

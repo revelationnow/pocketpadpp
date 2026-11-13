@@ -1055,6 +1055,49 @@ class WalkthroughTest {
         soft("w")
         assertEquals("Ctrl+W closes it", 1, onUi { it.workspace.docs.size })
 
+        // With suggestions on, the keyboard sends the whole word it is composing on every key press.
+        // (The pauses let the keyboard finish reconnecting, which would otherwise end the composition.)
+        fun connection() = onUi { it.editor.onCreateInputConnection(EditorInfo())!! }
+        setText("hello ")
+        sci(Sci.SCI_GOTOPOS, 6)
+        onUi { it.editor.setClipboard("PASTE") }
+        SystemClock.sleep(700)
+        val composing = connection()
+        onUi {
+            composing.setComposingText("w", 1)
+            composing.setComposingText("wo", 1)
+        }
+        tap("Ctrl")
+        onUi { composing.setComposingText("wov", 1) }
+        assertEquals("Ctrl+V pastes in the middle of a composed word", "hello woPASTE", text())
+        assertEquals(0, held())
+        // The keyboard then adopts the word at the caret, as it does after a paste or a tap.
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val adopted = it.editor.onCreateInputConnection(EditorInfo())!!
+            adopted.setComposingRegion(6, 13)
+            adopted.setComposingText("woPASTEv", 1)
+        }
+        assertEquals("and pastes again once the word has been adopted", "hello woPASTEPASTE", text())
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val adopted = it.editor.onCreateInputConnection(EditorInfo())!!
+            adopted.setComposingRegion(6, 18)
+            adopted.setComposingText("woPASTEPASTEa", 1)
+        }
+        assertEquals("Ctrl+A in the same state selects all", "0-18", selection())
+        assertEquals("hello woPASTEPASTE", text())
+        SystemClock.sleep(700)
+        onUi {
+            val adopted = it.editor.onCreateInputConnection(EditorInfo())!!
+            adopted.setComposingRegion(6, 18)
+            adopted.setComposingText("woPASTEPASTEx", 1)
+            adopted.finishComposingText()
+        }
+        assertEquals("without Ctrl the keyboard composes as usual", "hello woPASTEPASTEx", text())
+
         // A hardware keyboard goes through the same table.
         val now = SystemClock.uptimeMillis()
         val meta = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
