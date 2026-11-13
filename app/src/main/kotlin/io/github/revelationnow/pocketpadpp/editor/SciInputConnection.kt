@@ -90,7 +90,7 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
     }
 
     override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean =
-        edit("setComposingText(${quote(text)}, $newCursorPosition)") {
+        if (view.typedWithSoftModifiers(text, composing = true)) true else edit("setComposingText(${quote(text)}, $newCursorPosition)") {
             ScintillaNative.imeSetComposingText(it, text.toString(), newCursorPosition)
         }
 
@@ -101,7 +101,7 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
         edit("finishComposingText()") { ScintillaNative.imeFinishComposing(it) }
 
     override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean =
-        edit("commitText(${quote(text)}, $newCursorPosition)") {
+        if (view.typedWithSoftModifiers(text, composing = false)) true else edit("commitText(${quote(text)}, $newCursorPosition)") {
             ScintillaNative.imeCommitText(it, text.toString(), newCursorPosition)
         }
 

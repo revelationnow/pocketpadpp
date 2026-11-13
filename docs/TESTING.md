@@ -18,11 +18,13 @@ and saves a screenshot at every step. It covers:
 - every top-level menu, going into submenus and back with the arrow and with the Back key
 - the Show Symbol, word wrap, zoom, fold, line number, text size and read-only settings, and that they
   survive a restart
-- themes and dark mode, including that unsaved text survives the switch
+- themes and dark mode, including that unsaved text, the undo history and the open menu survive the switch
 - tabs: new, switch, move, close, the tab's own menu, the save prompt, session restore
 - files: opening, encodings and line endings kept on save, converting both
 - find, count, replace all with a regular expression, single undo
 - touch: drag scrolling, fling, tap, double tap, long press, selection handles, pinch zoom, the scroll thumb
+- the on-screen Ctrl, Alt and Shift keys: one-shot and locked, Notepad++'s shortcuts, Alt + letter for menus,
+  column selection with Alt+Shift+arrows, and a shortcut from a hardware keyboard
 - highlighting for C++, Python, HTML and JSON
 
 To run it yourself, start an emulator or plug in a phone with USB debugging and run `tools/run_ui_tests.sh`.
@@ -55,7 +57,6 @@ Editor:
 Application:
 - Regular expressions use ECMAScript syntax, not Notepad++'s Boost syntax (no lookbehind).
 - Folds are kept per tab while the app runs, but not yet across restarts.
-- Switching between a light and a dark theme rebuilds the screen, which clears the undo history.
 - No warning when a file changes on disk behind the editor's back.
 - Files larger than 64 MB are refused; loading is not incremental.
 - "ANSI" always means Windows-1252.

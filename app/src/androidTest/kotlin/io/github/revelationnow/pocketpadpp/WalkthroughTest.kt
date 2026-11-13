@@ -846,15 +846,20 @@ class WalkthroughTest {
         onUi { it.editor.typeText("unsaved words") }
         assertEquals("the default theme is white", 0xFFFFFFL, background())
 
-        // Dark mode rebuilds the screen; tabs and unsaved text come back.
+        // Dark mode changes the bars around the editor; the editor, its text and its undo history stay.
         openMenu("Settings", "Dark mode")
-        waitUntil("the screen to come back dark") { onUi { it.workspace.docs.size } == 2 && brightness(background()) < 128 }
-        assertEquals("unsaved text survives the switch", "unsaved words", text())
-        shot("dark-mode")
-        tapDescribed("Menu")
-        menu("Settings")
+        waitUntil("the screen to turn dark") { brightness(background()) < 128 }
+        assertTrue("the menu stays open across the switch", onScreen("Keyboard suggestions and autocorrect"))
         shot("dark-mode-menu")
         tapDescribed("Close menu")
+        assertEquals("unsaved text survives the switch", "unsaved words", text())
+        assertEquals(2, onUi { it.workspace.docs.size })
+        assertTrue("the undo history survives the switch", sci(Sci.SCI_CANUNDO) != 0L)
+        while (sci(Sci.SCI_CANUNDO) != 0L) sci(Sci.SCI_UNDO)
+        assertEquals("", text())
+        while (sci(Sci.SCI_CANREDO) != 0L) sci(Sci.SCI_REDO)
+        assertEquals("unsaved words", text())
+        shot("dark-mode")
         tap("theme.cpp")
         assertEquals(code, text())
         sci(Sci.SCI_COLOURISE, 0, -1)
@@ -872,7 +877,10 @@ class WalkthroughTest {
 
         // A light theme rebuilds the screen again.
         openMenu("Settings", "Theme", "Solarized-light")
-        waitUntil("the screen to come back light") { onUi { it.workspace.docs.size } == 2 && brightness(background()) > 128 }
+        waitUntil("the screen to turn light") { brightness(background()) > 128 }
+        assertTrue("the theme list stays open when a pick changes between dark and light", onScreen("Solarized-light"))
+        shot("theme-menu-after-light-pick")
+        tapDescribed("Close menu")
         sci(Sci.SCI_COLOURISE, 0, -1)
         shot("theme-solarized-light")
 
@@ -960,6 +968,99 @@ class WalkthroughTest {
         tap("new 1")
         device.waitForIdle()
         assertEquals("the fold survives a tap on its tab", 0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+    }
+
+    @Test
+    fun modifierKeysAndShortcuts() {
+        fun soft(text: String) = onUi { it.editor.onCreateInputConnection(EditorInfo())!!.commitText(text, 1) }
+        fun held() = onUi { it.editor.softModifiers }
+        setText("one two three\nfour\n")
+
+        // One tap holds Ctrl for the next key only.
+        tap("Ctrl")
+        assertEquals(Sci.SCMOD_CTRL, held())
+        shot("ctrl-held")
+        soft("a")
+        assertEquals("Ctrl+A selects everything instead of typing", "0-19", selection())
+        assertEquals("one two three\nfour\n", text())
+        assertEquals("Ctrl lets go after one key", 0, held())
+
+        sci(Sci.SCI_GOTOPOS, 2)
+        tap("Ctrl")
+        soft("d")
+        assertEquals("Ctrl+D duplicates the line", "one two three\none two three\nfour\n", text())
+        tap("Ctrl")
+        soft("z")
+        assertEquals("Ctrl+Z undoes", "one two three\nfour\n", text())
+
+        // A second tap locks it; a third releases it.
+        sci(Sci.SCI_GOTOPOS, 0)
+        tap("Ctrl")
+        tap("Ctrl")
+        shot("ctrl-locked")
+        tap("\u2192")
+        tap("\u2192")
+        assertEquals("Ctrl+Right moves by words while Ctrl is locked", 8L, sci(Sci.SCI_GETCURRENTPOS))
+        assertEquals(Sci.SCMOD_CTRL, held())
+        tap("Ctrl")
+        assertEquals("a third tap releases it", 0, held())
+        soft("x")
+        assertEquals("typing is back to normal", "one two xthree\nfour\n", text())
+        sci(Sci.SCI_UNDO)
+
+        // Shift extends the selection; Alt+Shift makes a column selection.
+        sci(Sci.SCI_GOTOPOS, 0)
+        tap("Shift")
+        tap("\u2192")
+        assertEquals("Shift+Right selects", "0-1", selection())
+        sci(Sci.SCI_GOTOPOS, 0)
+        tap("Shift")
+        tap("Shift")
+        tap("Alt")
+        tap("Alt")
+        tap("\u2193")
+        tap("\u2192")
+        tap("\u2192")
+        tap("\u2192")
+        assertTrue("Alt+Shift+arrows make a column selection", sci(Sci.SCI_SELECTIONISRECTANGLE) != 0L)
+        assertEquals("over two lines", 2L, sci(Sci.SCI_GETSELECTIONS))
+        shot("column-selection")
+        tap("Shift")
+        tap("Alt")
+        assertEquals(0, held())
+        onUi { it.editor.typeText("#") }
+        assertEquals("typing goes to every line of the column", "# two three\n#r\n", text())
+        sci(Sci.SCI_UNDO)
+        sci(Sci.SCI_GOTOPOS, 0)
+
+        // Alt and a letter opens that menu.
+        tap("Alt")
+        soft("f")
+        assertTrue("Alt+F opens the File menu", onScreen("Save As..."))
+        shot("alt-f-menu")
+        tapDescribed("Back")
+        assertTrue("with the main menu one level up", onScreen("Settings"))
+        tapDescribed("Close menu")
+
+        // Notepad++'s shortcuts.
+        tap("Ctrl")
+        soft("f")
+        assertTrue("Ctrl+F opens the find bar", onUi { it.findBar.isOpen })
+        tapDescribed("Close")
+        tap("Ctrl")
+        soft("n")
+        assertEquals("Ctrl+N opens a tab", 2, onUi { it.workspace.docs.size })
+        tap("Ctrl")
+        soft("w")
+        assertEquals("Ctrl+W closes it", 1, onUi { it.workspace.docs.size })
+
+        // A hardware keyboard goes through the same table.
+        val now = SystemClock.uptimeMillis()
+        val meta = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        instrumentation.sendKeySync(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_G, 0, meta))
+        instrumentation.sendKeySync(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_G, 0, meta))
+        assertTrue("Ctrl+G on a keyboard opens Go to", onScreen("Go to line"))
+        tapButton("Cancel")
     }
 
     private companion object {

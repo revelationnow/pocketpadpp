@@ -9,6 +9,7 @@ class Palette(val dark: Boolean) {
 
     /** Toolbar, status bar and the system bars. */
     val chrome = pick(0xFFEFEFEF, 0xFF2B2B2B)
+    val accent = pick(0xFF2A7BDE, 0xFF5AA2F0)
     val chromeText = pick(0xFF202020, 0xFFE0E0E0)
     val chromeDimText = pick(0xFF404040, 0xFFB0B0B0)
     val keysBack = pick(0xFFF7F7F7, 0xFF333333)

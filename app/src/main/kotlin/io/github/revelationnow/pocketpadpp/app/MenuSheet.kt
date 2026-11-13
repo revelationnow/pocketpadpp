@@ -43,7 +43,15 @@ class MenuSpec {
  * A drill-down menu: one panel at the bottom of the screen that replaces its content when a submenu is
  * opened, with a back arrow in the header (and the Back key) to return to the level above.
  */
-class MenuSheet(private val context: Context, private val dark: Boolean = false) {
+class MenuSheet(private val context: Context, dark: Boolean = false) {
+
+    /** Light or dark colours. Can change while the menu is open, which is what picking a theme from it does. */
+    var dark: Boolean = dark
+        set(value) {
+            field = value
+            if (stack.isNotEmpty()) render()
+        }
+
 
     private class Level(val title: String, val build: MenuSpec.() -> Unit)
 
@@ -52,16 +60,18 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
 
     private val density = context.resources.displayMetrics.density
     private val stack = ArrayList<Level>()
-    private val textColour = if (dark) 0xFFE6E6E6.toInt() else 0xFF202020.toInt()
-    private val dim = if (dark) 0xFF8A8A8A.toInt() else 0xFF9A9A9A.toInt()
-    private val back = if (dark) 0xFF2B2B2B.toInt() else 0xFFFFFFFF.toInt()
-    private val headerBack = if (dark) 0xFF383838.toInt() else 0xFFEFEFEF.toInt()
-    private val accent = 0xFF2A7BDE.toInt()
+    private val textColour get() = if (dark) 0xFFE6E6E6.toInt() else 0xFF202020.toInt()
+    private val dim get() = if (dark) 0xFF8A8A8A.toInt() else 0xFF9A9A9A.toInt()
+    private val back get() = if (dark) 0xFF2B2B2B.toInt() else 0xFFFFFFFF.toInt()
+    private val headerBack get() = if (dark) 0xFF383838.toInt() else 0xFFEFEFEF.toInt()
+    private val accent get() = if (dark) 0xFF5AA2F0.toInt() else 0xFF2A7BDE.toInt()
 
     private val header = LinearLayout(context)
     private val backButton = TextView(context)
     private val title = TextView(context)
     private val rows = LinearLayout(context)
+    private val root = LinearLayout(context)
+    private val closeButton = TextView(context)
     private val scroller = ScrollView(context)
 
     private val dialog = object : Dialog(context) {
@@ -81,20 +91,15 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
 
     init {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(back)
-        }
+        root.orientation = LinearLayout.VERTICAL
         header.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(headerBack)
         }
         backButton.apply {
             this.text = "‹"
             contentDescription = "Back"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-            setTextColor(accent)
             gravity = Gravity.CENTER
             background = ripple()
             setOnClickListener { up() }
@@ -102,7 +107,6 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
         title.apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             setTypeface(typeface, Typeface.BOLD)
-            setTextColor(textColour)
             // Long paths lose their start, never the name of the level being shown.
             isSingleLine = true
             ellipsize = android.text.TextUtils.TruncateAt.START
@@ -110,11 +114,10 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
         }
         header.addView(backButton, LinearLayout.LayoutParams(dp(48f), dp(48f)))
         header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        header.addView(TextView(context).apply {
+        header.addView(closeButton.apply {
             this.text = "✕"
             contentDescription = "Close menu"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-            setTextColor(dim)
             gravity = Gravity.CENTER
             background = ripple()
             setOnClickListener { dialog.dismiss() }
@@ -151,6 +154,14 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
         }
     }
 
+    /** Opens the submenu with this label on the level being shown, as if it had been tapped. */
+    fun open(label: String) {
+        val level = stack.lastOrNull() ?: return
+        val entry = MenuSpec().apply(level.build).entries.firstOrNull { it.label == label && it.children != null } ?: return
+        stack += Level(entry.label, entry.children!!)
+        render()
+    }
+
     /** Goes up one level. Returns false at the top. */
     private fun up(): Boolean {
         if (stack.size <= 1) return false
@@ -162,6 +173,11 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
     private fun render() {
         val level = stack.last()
         val spec = MenuSpec().apply(level.build)
+        root.setBackgroundColor(back)
+        header.setBackgroundColor(headerBack)
+        backButton.setTextColor(accent)
+        title.setTextColor(textColour)
+        closeButton.setTextColor(dim)
         title.text = stack.joinToString("  ›  ") { it.title }
         backButton.visibility = if (stack.size > 1) View.VISIBLE else View.INVISIBLE
         rows.removeAllViews()

@@ -76,6 +76,21 @@ class ScintillaView @JvmOverloads constructor(
      */
     var onCharAdded: ((Int) -> Unit)? = null
 
+    /**
+     * Modifiers held by the on-screen Ctrl, Alt and Shift keys, as SCMOD_* bits. They apply to whatever key
+     * comes next, from the soft keyboard, the extra keys row or a hardware keyboard.
+     */
+    var softModifiers = 0
+
+    /** Called after a key used [softModifiers], so that one-shot modifiers can be released. */
+    var onSoftModifiersUsed: (() -> Unit)? = null
+
+    /**
+     * Application shortcuts. Receives the key (an upper-case letter, a digit, an SCK_* code or
+     * [KEY_FUNCTION] + n for F-keys) and SCMOD_* bits; returns true when it handled the key.
+     */
+    var onShortcut: ((Int, Int) -> Boolean)? = null
+
     /** Called when a pinch changed the zoom level, so that margins sized to the text can follow. */
     var onZoomChanged: (() -> Unit)? = null
 
@@ -193,6 +208,40 @@ class ScintillaView @JvmOverloads constructor(
     /** Types text at every caret, as a hardware keyboard would. */
     fun typeText(text: String) {
         if (ptr != 0L) ScintillaNative.insertText(ptr, text)
+    }
+
+    /** A key with modifiers: the application's shortcuts get it first, then Scintilla's own key map. */
+    fun shortcutKey(key: Int, modifiers: Int): Boolean {
+        if (ptr == 0L) return false
+        if (onShortcut?.invoke(key, modifiers) == true) return true
+        return key < KEY_FUNCTION && ScintillaNative.keyDown(ptr, key, modifiers)
+    }
+
+    /**
+     * A character from the soft keyboard while Ctrl or Alt is held on screen is a shortcut, not text.
+     * Returns true when the text was used up that way.
+     */
+    internal fun typedWithSoftModifiers(text: CharSequence, composing: Boolean): Boolean {
+        val modifiers = softModifiers
+        if (modifiers == 0) return false
+        if (modifiers and (Sci.SCMOD_CTRL or Sci.SCMOD_ALT) == 0 || text.length != 1) {
+            // Shift alone, or more than one character: ordinary typing, which still uses up a one-shot key.
+            if (!composing) onSoftModifiersUsed?.invoke()
+            return false
+        }
+        val ch = text[0]
+        val key = when {
+            ch.isLetter() -> ch.uppercaseChar().code
+            ch == '+' || ch == '=' -> Sci.SCK_ADD
+            ch == '-' -> Sci.SCK_SUBTRACT
+            ch == '/' -> Sci.SCK_DIVIDE
+            else -> ch.code
+        }
+        shortcutKey(key, modifiers)
+        onSoftModifiersUsed?.invoke()
+        // The keyboard believes it has started a word; make it start afresh.
+        if (composing) imm.restartInput(this)
+        return true
     }
 
     /** Presses a Scintilla key (SCK_*) with SCMOD_* modifiers. */
@@ -730,9 +779,10 @@ class ScintillaView @JvmOverloads constructor(
     /** Handles a key press from a hardware keyboard or one the soft keyboard sent as a key event. */
     internal fun handleKey(event: KeyEvent): Boolean {
         if (ptr == 0L || event.action != KeyEvent.ACTION_DOWN) return false
-        val modifiers = (if (event.isShiftPressed) Sci.SCMOD_SHIFT else 0) or
+        val hardware = (if (event.isShiftPressed) Sci.SCMOD_SHIFT else 0) or
             (if (event.isCtrlPressed) Sci.SCMOD_CTRL else 0) or
             (if (event.isAltPressed) Sci.SCMOD_ALT else 0)
+        val modifiers = hardware or softModifiers
         val key = when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT -> Sci.SCK_LEFT
             KeyEvent.KEYCODE_DPAD_RIGHT -> Sci.SCK_RIGHT
@@ -751,16 +801,38 @@ class ScintillaView @JvmOverloads constructor(
             else -> 0
         }
         if (key != 0) {
-            ScintillaNative.keyDown(ptr, key, modifiers)
+            if (modifiers == 0) ScintillaNative.keyDown(ptr, key, 0) else shortcutKey(key, modifiers)
+            if (softModifiers != 0) onSoftModifiersUsed?.invoke()
             return true
         }
-        if (event.isCtrlPressed && !event.isAltPressed && event.keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
-            // Scintilla's own key map provides Ctrl+Z, Y, X, C, V, A, D, L, T, U and friends.
-            return ScintillaNative.keyDown(ptr, 'A'.code + (event.keyCode - KeyEvent.KEYCODE_A), modifiers)
+        if (event.keyCode in KeyEvent.KEYCODE_F1..KeyEvent.KEYCODE_F12) {
+            val handled = onShortcut?.invoke(KEY_FUNCTION + 1 + (event.keyCode - KeyEvent.KEYCODE_F1), modifiers) == true
+            if (softModifiers != 0) onSoftModifiersUsed?.invoke()
+            return handled
+        }
+        val shortcut = when (event.keyCode) {
+            in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'A'.code + (event.keyCode - KeyEvent.KEYCODE_A)
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> '0'.code + (event.keyCode - KeyEvent.KEYCODE_0)
+            KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_NUMPAD_ADD -> Sci.SCK_ADD
+            KeyEvent.KEYCODE_MINUS, KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> Sci.SCK_SUBTRACT
+            KeyEvent.KEYCODE_SLASH, KeyEvent.KEYCODE_NUMPAD_DIVIDE -> Sci.SCK_DIVIDE
+            else -> 0
+        }
+        if (shortcut != 0 && modifiers and Sci.SCMOD_CTRL != 0) {
+            // The application's shortcuts first; Scintilla's own key map provides Ctrl+Z, Y, X, C, V, A, D, L, T, U and friends.
+            val handled = shortcutKey(shortcut, modifiers)
+            if (softModifiers != 0) onSoftModifiersUsed?.invoke()
+            return handled
+        }
+        if (shortcut != 0 && modifiers and Sci.SCMOD_ALT != 0 && onShortcut?.invoke(shortcut, modifiers) == true) {
+            // Only when the application has a use for it: on many keyboards the right Alt key types characters.
+            if (softModifiers != 0) onSoftModifiersUsed?.invoke()
+            return true
         }
         val ch = event.unicodeChar
         if (ch != 0 && (ch and KeyCharacterMap.COMBINING_ACCENT) == 0 && !Character.isISOControl(ch)) {
             ScintillaNative.insertText(ptr, String(Character.toChars(ch)))
+            if (softModifiers != 0) onSoftModifiersUsed?.invoke()
             return true
         }
         return false
@@ -930,6 +1002,9 @@ class ScintillaView @JvmOverloads constructor(
     }
 
     companion object {
+        /** Added to n for the F-keys in [onShortcut]: F3 is KEY_FUNCTION + 3. */
+        const val KEY_FUNCTION = 0x1000
+
         private const val CARET_HANDLE_MS = 4000L
         private const val SCROLL_BAR_MS = 1500L
         private var platformReady = false

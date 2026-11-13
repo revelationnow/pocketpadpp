@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.util.TypedValue
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -69,6 +70,12 @@ class MainActivity : Activity() {
     private val imeLines = ArrayDeque<String>()
 
     private lateinit var palette: Palette
+    private lateinit var themed: Context
+
+    // The on-screen Ctrl, Alt and Shift keys: SCMOD_* bits held for the next key only, and those locked on.
+    private var armedModifiers = 0
+    private var lockedModifiers = 0
+    private val modifierKeys = LinkedHashMap<Int, Button>()
     private lateinit var root: LinearLayout
     private var themeName = ""
     private var fontSize = 13
@@ -99,58 +106,8 @@ class MainActivity : Activity() {
         fontSize = prefs.getInt("fontSize", 13)
         showLineNumbers = prefs.getBoolean("lineNumbers", true)
 
-        root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            fitsSystemWindows = true
-            setBackgroundColor(theme.background or 0xFF000000.toInt())
-        }
-
-        val toolbar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(palette.chrome)
-        }
-        fun tool(label: String, description: String, action: (View) -> Unit): Button = barButton(label, description, action).also {
-            toolbar.addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        }
-        tool("New", "New") { workspace.newDocument() }
-        tool("Open", "Open") { openFiles() }
-        tool("Save", "Save") { save() }
-        tool("Undo", "Undo") { editor.send(Sci.SCI_UNDO) }
-        tool("Redo", "Redo") { editor.send(Sci.SCI_REDO) }
-        tool("Find", "Find") { findBar.open(withReplace = false) }
-        moreButton = tool("⋮", "Menu") { showMainMenu() }
-        root.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)))
-
-        tabs = TabStrip(this, palette)
-        root.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38f)))
-
         editor = ScintillaView(this)
-        root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-
-        imeLogView = TextView(this).apply {
-            typeface = Typeface.MONOSPACE
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            setTextColor(0xFF004400.toInt())
-            setBackgroundColor(0xFFF4FFF4.toInt())
-            setPadding(dp(6f), dp(2f), dp(6f), dp(2f))
-            visibility = View.GONE
-        }
-        root.addView(imeLogView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
-        findBar = FindBar(this, editor, palette)
-        findBar.onClose = { editor.requestFocus() }
-        root.addView(findBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
-        root.addView(extraKeys(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42f)))
-        root.addView(statusBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        setContentView(root)
-        // The strip behind the system's navigation bar matches the status bar above it.
-        window.navigationBarColor = palette.chrome
-        if (Build.VERSION.SDK_INT >= 27 && !palette.dark) {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
+        buildScreen(theme.background)
 
         // Notepad++'s own language and style definitions, shipped as assets.
         val languages = assets.open("npp/languages.tsv").use { table ->
@@ -168,19 +125,84 @@ class MainActivity : Activity() {
             )
         }
         workspace.onTabsChanged = { refreshTabs() }
-        tabs.onSelect = { index -> workspace.docs.getOrNull(index)?.let { workspace.activate(it) } }
-        tabs.onClose = { index -> workspace.docs.getOrNull(index)?.let { requestClose(it) } }
-        tabs.onLongPress = { index, _ -> workspace.docs.getOrNull(index)?.let { showTabMenu(it) } }
 
         editor.onStateChanged = { onEditorStateChanged() }
         editor.onTextChanged = { workspace.textChanged() }
         editor.onCharAdded = { ch -> EditOps.autoIndent(editor, ch) }
         editor.onZoomChanged = { ThemeApplier.updateLineNumberWidth(editor, showLineNumbers) }
+        editor.onShortcut = { key, modifiers -> shortcut(key, modifiers) }
+        editor.onSoftModifiersUsed = { releaseModifiers() }
         editor.imeLog = { line -> onImeLog(line) }
         editor.requestFocus()
         refreshTabs()
 
         restoreSession { handleIntent(intent) }
+    }
+
+    /**
+     * Builds everything around the editor: toolbar, tabs, find bar, extra keys and status bar.
+     * Called again when the theme goes between light and dark; the editor view itself is kept, and with it
+     * the open documents and their undo history.
+     */
+    private fun buildScreen(background: Int) {
+        // Widgets and dialogs take their look from this context rather than from the window's fixed theme.
+        themed = ContextThemeWrapper(this, if (palette.dark) R.style.AppTheme_Dark else R.style.AppTheme)
+        (editor.parent as? ViewGroup)?.removeView(editor)
+
+        root = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            fitsSystemWindows = true
+            setBackgroundColor(background or 0xFF000000.toInt())
+        }
+
+        val toolbar = LinearLayout(themed).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(palette.chrome)
+        }
+        fun tool(label: String, description: String, action: (View) -> Unit): Button = barButton(label, description, action).also {
+            toolbar.addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        }
+        tool("New", "New") { workspace.newDocument() }
+        tool("Open", "Open") { openFiles() }
+        tool("Save", "Save") { save() }
+        tool("Undo", "Undo") { editor.send(Sci.SCI_UNDO) }
+        tool("Redo", "Redo") { editor.send(Sci.SCI_REDO) }
+        tool("Find", "Find") { findBar.open(withReplace = false) }
+        moreButton = tool("⋮", "Menu") { showMainMenu() }
+        root.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)))
+
+        tabs = TabStrip(themed, palette)
+        root.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38f)))
+
+        root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        imeLogView = TextView(themed).apply {
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            setTextColor(0xFF004400.toInt())
+            setBackgroundColor(0xFFF4FFF4.toInt())
+            setPadding(dp(6f), dp(2f), dp(6f), dp(2f))
+            visibility = View.GONE
+        }
+        root.addView(imeLogView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        findBar = FindBar(themed, editor, palette)
+        findBar.onClose = { editor.requestFocus() }
+        root.addView(findBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        root.addView(extraKeys(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42f)))
+        root.addView(statusBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        setContentView(root)
+        tabs.onSelect = { index -> workspace.docs.getOrNull(index)?.let { workspace.activate(it) } }
+        tabs.onClose = { index -> workspace.docs.getOrNull(index)?.let { requestClose(it) } }
+        tabs.onLongPress = { index, _ -> workspace.docs.getOrNull(index)?.let { showTabMenu(it) } }
+
+        window.statusBarColor = palette.chrome
+        window.navigationBarColor = palette.chrome
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = if (palette.dark) 0 else
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or (if (Build.VERSION.SDK_INT >= 27) View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -216,7 +238,7 @@ class MainActivity : Activity() {
     }
 
     private fun barButton(label: String, description: String, onClick: (View) -> Unit): Button =
-        Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+        Button(themed, null, android.R.attr.borderlessButtonStyle).apply {
             text = label
             contentDescription = description
             isAllCaps = false
@@ -231,9 +253,9 @@ class MainActivity : Activity() {
 
     /** A row of keys phone keyboards make hard to reach. */
     private fun extraKeys(): View {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun key(label: String, action: () -> Unit) {
-            row.addView(Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+        val row = LinearLayout(themed).apply { orientation = LinearLayout.HORIZONTAL }
+        fun key(label: String, action: () -> Unit): Button {
+            val button = Button(themed, null, android.R.attr.borderlessButtonStyle).apply {
                 text = label
                 isAllCaps = false
                 typeface = Typeface.MONOSPACE
@@ -243,33 +265,172 @@ class MainActivity : Activity() {
                 setPadding(dp(8f), 0, dp(8f), 0)
                 isFocusable = false
                 setOnClickListener { action() }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            }
+            row.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            return button
         }
-        key("Tab") { editor.pressKey(Sci.SCK_TAB) }
-        key("←") { editor.pressKey(Sci.SCK_LEFT) }
-        key("↑") { editor.pressKey(Sci.SCK_UP) }
-        key("↓") { editor.pressKey(Sci.SCK_DOWN) }
-        key("→") { editor.pressKey(Sci.SCK_RIGHT) }
-        key("Home") { editor.pressKey(Sci.SCK_HOME) }
-        key("End") { editor.pressKey(Sci.SCK_END) }
+        // Sticky modifiers: one tap holds the key for the next key press, a second tap locks it, a third releases it.
+        modifierKeys.clear()
+        for ((label, bit) in listOf("Ctrl" to Sci.SCMOD_CTRL, "Alt" to Sci.SCMOD_ALT, "Shift" to Sci.SCMOD_SHIFT)) {
+            modifierKeys[bit] = key(label) { cycleModifier(bit) }
+        }
+        showModifiers()
+        fun press(label: String, code: Int) = key(label) {
+            val modifiers = editor.softModifiers
+            if (modifiers == 0) editor.pressKey(code) else editor.shortcutKey(code, modifiers)
+            releaseModifiers()
+        }
+        press("Tab", Sci.SCK_TAB)
+        press("←", Sci.SCK_LEFT)
+        press("↑", Sci.SCK_UP)
+        press("↓", Sci.SCK_DOWN)
+        press("→", Sci.SCK_RIGHT)
+        press("Home", Sci.SCK_HOME)
+        press("End", Sci.SCK_END)
         for (symbol in listOf("{", "}", "(", ")", "[", "]", ";", ":", "\"", "'", "<", ">", "=", "/", "\\", "|", "&", "!", "_", "#")) {
-            key(symbol) { editor.typeText(symbol) }
+            key(symbol) {
+                editor.typeText(symbol)
+                releaseModifiers()
+            }
         }
-        return HorizontalScrollView(this).apply {
+        return HorizontalScrollView(themed).apply {
             isHorizontalScrollBarEnabled = false
             setBackgroundColor(palette.keysBack)
             addView(row, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
     }
 
+    private fun cycleModifier(bit: Int) {
+        when {
+            lockedModifiers and bit != 0 -> lockedModifiers = lockedModifiers and bit.inv()
+            armedModifiers and bit != 0 -> {
+                armedModifiers = armedModifiers and bit.inv()
+                lockedModifiers = lockedModifiers or bit
+            }
+            else -> armedModifiers = armedModifiers or bit
+        }
+        showModifiers()
+    }
+
+    /** One-shot modifiers let go once a key has used them; locked ones stay. */
+    private fun releaseModifiers() {
+        if (armedModifiers != 0) {
+            armedModifiers = 0
+            showModifiers()
+        }
+    }
+
+    private fun showModifiers() {
+        editor.softModifiers = armedModifiers or lockedModifiers
+        for ((bit, button) in modifierKeys) {
+            val locked = lockedModifiers and bit != 0
+            val armed = armedModifiers and bit != 0
+            button.setBackgroundColor(if (locked) palette.accent else Color.TRANSPARENT)
+            button.setTextColor(if (locked) Color.WHITE else if (armed) palette.accent else palette.chromeText)
+            button.setTypeface(Typeface.MONOSPACE, if (armed || locked) Typeface.BOLD else Typeface.NORMAL)
+            button.contentDescription = button.text.toString() + (if (locked) ", locked" else if (armed) ", on for the next key" else "")
+        }
+    }
+
+    /**
+     * Notepad++'s default shortcuts, for the on-screen modifier keys and for hardware keyboards.
+     * Keys are upper-case letters, digits, SCK_* codes or F-keys. Returning false passes the key on to
+     * Scintilla's own key map, which has the editing shortcuts (Ctrl+Z, Y, X, C, V, A, D, L, T, U...).
+     */
+    private fun shortcut(key: Int, modifiers: Int): Boolean {
+        val ctrl = Sci.SCMOD_CTRL
+        val alt = Sci.SCMOD_ALT
+        val shift = Sci.SCMOD_SHIFT
+        val language = workspace.active.language
+        val docs = workspace.docs
+        val index = docs.indexOf(workspace.active)
+        fun f(n: Int) = ScintillaView.KEY_FUNCTION + n
+        when (modifiers) {
+            0 -> when (key) {
+                f(2) -> goToBookmark(forward = true)
+                f(3) -> findBar.find(forward = true)
+                else -> return false
+            }
+            shift -> when (key) {
+                f(2) -> goToBookmark(forward = false)
+                f(3) -> findBar.find(forward = false)
+                else -> return false
+            }
+            ctrl -> when (key) {
+                'N'.code -> workspace.newDocument()
+                'O'.code -> openFiles()
+                'S'.code -> save()
+                'W'.code -> requestClose(workspace.active)
+                'F'.code -> findBar.open(withReplace = false)
+                'H'.code -> findBar.open(withReplace = true)
+                'G'.code -> goToLine()
+                'B'.code -> EditOps.goToMatchingBrace(editor)
+                'Q'.code -> EditOps.toggleLineComment(editor, language.commentLine)
+                'K'.code -> EditOps.setLineComment(editor, language.commentLine, comment = true)
+                'J'.code -> EditOps.joinLines(editor)
+                'I'.code -> EditOps.splitLines(editor)
+                Sci.SCK_TAB, Sci.SCK_NEXT -> workspace.activate(docs[(index + 1) % docs.size])
+                Sci.SCK_PRIOR -> workspace.activate(docs[(index + docs.size - 1) % docs.size])
+                Sci.SCK_ADD -> zoom { editor.send(Sci.SCI_ZOOMIN) }
+                Sci.SCK_SUBTRACT -> zoom { editor.send(Sci.SCI_ZOOMOUT) }
+                Sci.SCK_DIVIDE -> zoom { editor.send(Sci.SCI_SETZOOM, 0) }
+                f(2) -> toggleBookmark()
+                f(3) -> findBar.findSelection(forward = true, remember = true)
+                else -> return false
+            }
+            ctrl or shift -> when (key) {
+                'S'.code -> saveAll()
+                'W'.code -> closeMany(docs.toList())
+                'Q'.code -> EditOps.streamComment(editor, language.commentStart, language.commentEnd)
+                'K'.code -> EditOps.setLineComment(editor, language.commentLine, comment = false)
+                Sci.SCK_TAB -> workspace.activate(docs[(index + docs.size - 1) % docs.size])
+                Sci.SCK_UP -> editor.send(Sci.SCI_MOVESELECTEDLINESUP)
+                Sci.SCK_DOWN -> editor.send(Sci.SCI_MOVESELECTEDLINESDOWN)
+                f(3) -> findBar.findSelection(forward = false, remember = true)
+                else -> return false
+            }
+            ctrl or alt -> when (key) {
+                'S'.code -> saveAs(copy = false)
+                'F'.code -> EditOps.foldCurrent(editor, collapse = true)
+                else -> return false
+            }
+            ctrl or alt or shift -> when (key) {
+                'F'.code -> EditOps.foldCurrent(editor, collapse = false)
+                'B'.code -> EditOps.selectBetweenBraces(editor)
+                else -> return false
+            }
+            // Alt and a letter opens that menu, as on Windows.
+            alt -> when (key) {
+                'F'.code -> showMainMenu("File")
+                'E'.code -> showMainMenu("Edit")
+                'S'.code -> showMainMenu("Search")
+                'V'.code -> showMainMenu("View")
+                'N'.code -> showMainMenu("Encoding")
+                'L'.code -> showMainMenu("Language")
+                'T'.code -> showMainMenu("Settings")
+                '0'.code -> editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_CONTRACT.toLong())
+                in '1'.code..'8'.code -> EditOps.foldLevel(editor, key - '0'.code, collapse = true)
+                else -> return false
+            }
+            alt or shift -> when (key) {
+                '0'.code -> editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_EXPAND.toLong())
+                in '1'.code..'8'.code -> EditOps.foldLevel(editor, key - '0'.code, collapse = false)
+                else -> return false
+            }
+            else -> return false
+        }
+        updateStatus()
+        return true
+    }
+
     /** Notepad++'s status bar: position on the left; line ending, encoding and language on the right, each tappable. */
     private fun statusBar(): View {
-        val bar = LinearLayout(this).apply {
+        val bar = LinearLayout(themed).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(palette.chrome)
         }
-        statusText = TextView(this).apply {
+        statusText = TextView(themed).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setTextColor(palette.chromeDimText)
             setPadding(dp(8f), dp(4f), dp(4f), dp(4f))
@@ -278,7 +439,7 @@ class MainActivity : Activity() {
             setOnClickListener { goToLine() }
         }
         bar.addView(statusText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        fun chip(action: (View) -> Unit) = TextView(this).apply {
+        fun chip(action: (View) -> Unit) = TextView(themed).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setTextColor(palette.chromeText)
             setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
@@ -382,7 +543,7 @@ class MainActivity : Activity() {
             }
         }
         if (workspace.isDirty(doc)) {
-            AlertDialog.Builder(this)
+            AlertDialog.Builder(themed)
                 .setMessage("Are you sure you want to reload the current file and lose the changes made in Pocketpad++?")
                 .setPositiveButton(android.R.string.ok) { _, _ -> reload() }
                 .setNegativeButton(android.R.string.cancel, null)
@@ -434,7 +595,7 @@ class MainActivity : Activity() {
                     toast(if (complete) "Saved $name" else "Saved, but ${encoding.label} cannot hold every character; those were written as ?")
                     then?.invoke()
                 }.onFailure {
-                    AlertDialog.Builder(this)
+                    AlertDialog.Builder(themed)
                         .setTitle("Save failed")
                         .setMessage("${it.message ?: it.javaClass.simpleName}\n\nThe file may be read-only for this app. Use Save As to write it somewhere else.")
                         .setPositiveButton("Save As...") { _, _ -> saveAs(doc, copy = false, then = then) }
@@ -493,7 +654,7 @@ class MainActivity : Activity() {
             return
         }
         workspace.activate(doc)
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(themed)
             .setTitle("Save")
             .setMessage("Save file \"${doc.name}\"?")
             .setPositiveButton("Yes") { _, _ -> save(doc) { rememberRecent(doc); workspace.close(doc); then?.invoke() } }
@@ -546,20 +707,23 @@ class MainActivity : Activity() {
 
     private fun showMenu(title: String, build: MenuSpec.() -> Unit) {
         menuSheet?.dismiss()
-        menuSheet = MenuSheet(this, palette.dark).also { sheet ->
+        menuSheet = MenuSheet(themed, palette.dark).also { sheet ->
             sheet.onAction = { updateStatus() }
             sheet.show(title, build)
         }
     }
 
-    private fun showMainMenu() = showMenu("Menu") {
-        sub("File") { fileMenu() }
-        sub("Edit") { editMenu() }
-        sub("Search") { searchMenu() }
-        sub("View") { viewMenu() }
-        sub("Encoding") { encodingMenu() }
-        sub("Language") { languageMenu() }
-        sub("Settings") { settingsMenu() }
+    private fun showMainMenu(open: String? = null) {
+        showMenu("Menu") {
+            sub("File") { fileMenu() }
+            sub("Edit") { editMenu() }
+            sub("Search") { searchMenu() }
+            sub("View") { viewMenu() }
+            sub("Encoding") { encodingMenu() }
+            sub("Language") { languageMenu() }
+            sub("Settings") { settingsMenu() }
+        }
+        if (open != null) menuSheet?.open(open)
     }
 
     private fun MenuSpec.fileMenu() {
@@ -876,15 +1040,16 @@ class MainActivity : Activity() {
         themeName = name
         prefs.edit().putString("theme", name).apply()
         if (theme.isDark != palette.dark) {
-            // Bars, menus and dialogs take their colours from the window's theme, which is fixed once the
-            // window exists, so going between light and dark rebuilds the screen. Tabs and unsaved text
-            // come back through the session snapshot.
-            menuSheet?.dismiss()
-            recreate()
-        } else {
-            workspace.theme = theme
-            root.setBackgroundColor(theme.background or 0xFF000000.toInt())
+            // Only the bars around the editor are rebuilt in the other colours. The editor view stays, so the
+            // open documents keep their undo history, and a menu that is open stays open.
+            palette = Palette(theme.isDark)
+            buildScreen(theme.background)
+            menuSheet?.dark = palette.dark
+            refreshTabs()
+            editor.requestFocus()
         }
+        workspace.theme = theme
+        root.setBackgroundColor(theme.background or 0xFF000000.toInt())
     }
 
     private fun setFontSize(size: Int) {
@@ -967,17 +1132,17 @@ class MainActivity : Activity() {
     private fun goToLine() {
         val lines = editor.send(Sci.SCI_GETLINECOUNT)
         val current = editor.send(Sci.SCI_LINEFROMPOSITION, editor.send(Sci.SCI_GETCURRENTPOS)) + 1
-        val input = EditText(this).apply {
+        val input = EditText(themed).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             hint = "1 - $lines"
             setText(current.toString())
             selectAll()
         }
-        val container = LinearLayout(this).apply {
+        val container = LinearLayout(themed).apply {
             setPadding(dp(20f), dp(8f), dp(20f), 0)
             addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(themed)
             .setTitle("Go to line")
             .setView(container)
             .setPositiveButton("Go") { _, _ ->
@@ -1029,7 +1194,7 @@ class MainActivity : Activity() {
             append("Document length: ").append(bytes).append(" bytes as UTF-8\n")
             append(editor.send(Sci.SCI_COUNTCHARACTERS, start, end)).append(" selected characters (").append(end - start).append(" bytes)")
         }
-        AlertDialog.Builder(this).setTitle("Summary").setMessage(message).setPositiveButton(android.R.string.ok, null).show()
+        AlertDialog.Builder(themed).setTitle("Summary").setMessage(message).setPositiveButton(android.R.string.ok, null).show()
     }
 
     // endregion
