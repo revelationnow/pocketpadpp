@@ -928,11 +928,27 @@ class WalkthroughTest {
         sci(Sci.SCI_FOLDLINE, 1, Sci.SC_FOLDACTION_CONTRACT.toLong())
         assertEquals(0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
         tap("New")
+        assertEquals("the fold is noted when its tab is left", listOf(1L), onUi { it.workspace.docs[0].folds })
         onUi { it.editor.typeText("other tab") }
-        tap("new 1")
-        assertEquals("the fold is still there after visiting another tab", 0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+
+        // Straight after switching back, before the screen has been drawn again...
+        val atOnce = onUi { activity ->
+            activity.workspace.activate(activity.workspace.docs[0])
+            activity.editor.send(Sci.SCI_GETLINEVISIBLE, 2)
+        }
+        assertEquals("the fold is put back when the tab is shown again", 0L, atOnce)
+        // ...and once everything has settled.
+        device.waitForIdle()
+        SystemClock.sleep(800)
+        assertEquals("the fold is still there after the screen has settled", 0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
         assertEquals("and only that block is folded", 1L, sci(Sci.SCI_GETLINEVISIBLE, 4))
         shot("fold-kept-per-tab")
+
+        // The same through the tab strip.
+        tap("\u25CF new 2")
+        tap("new 1")
+        device.waitForIdle()
+        assertEquals("the fold survives a tap on its tab", 0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
     }
 
     private companion object {

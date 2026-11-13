@@ -9,14 +9,16 @@ the Notepad++ project.
 
 ## Status
 
-Early, but an editor: tabs, opening and saving files, Notepad++'s languages and default theme,
-encodings and line endings, find and replace with regular expressions, bookmarks, folding, line
-operations, and a session that brings back open tabs and unsaved text. Underneath is a Scintilla
-platform layer written for Android, with touch selection, smooth scrolling and soft keyboard support.
+Early, but an editor: tabs, opening and saving files, Notepad++'s languages and themes (with dark
+mode), encodings and line endings, find and replace with regular expressions, bookmarks, folding,
+multi-select, the Edit menu's line, case, blank and comment commands, and a session that brings back
+open tabs and unsaved text. Underneath is a Scintilla platform layer written for Android, with touch
+selection, smooth scrolling, pinch zoom and soft keyboard support.
 
 - [docs/FEATURES.md](docs/FEATURES.md): every Notepad++ menu command and where it stands
   (generated from Notepad++'s own menu resource).
-- [docs/TESTING.md](docs/TESTING.md): what to check on a device, and known gaps.
+- [docs/TESTING.md](docs/TESTING.md): how it is tested (including an emulator walkthrough that runs
+  on every push), what still needs a real phone, and known gaps.
 
 ## Try it
 
@@ -36,7 +38,8 @@ repository, so they update each other but are not store releases.
 | `app/src/main/kotlin/.../editor/` | `ScintillaView`: drawing, touch scrolling, selection handles, input connection |
 | `app/src/main/kotlin/.../core/` | Application logic without Android classes: encodings, Notepad++ language and theme import, search, line operations, sessions |
 | `app/src/main/kotlin/.../app/`, `MainActivity.kt` | Tabs, file access, find bar, menus |
-| `app/src/main/assets/npp/` | Notepad++'s `langs.model.xml` and `stylers.model.xml`, plus a language table generated from its sources |
+| `app/src/main/assets/npp/` | Notepad++'s `langs.model.xml`, `stylers.model.xml` and themes, plus a language table generated from its sources |
+| `app/src/androidTest/` | The walkthrough that drives the app on an emulator and saves screenshots |
 | `hosttest/` | Tests that run the native layer and the application logic on a desktop JVM, with Java2D standing in for the Android canvas |
 | `tools/` | Generators for Scintilla constants, the language table and the feature map |
 
@@ -50,7 +53,8 @@ Android Studio (Ladybug or newer) opens the project directly. From a shell:
 
 ```sh
 ./gradlew assembleRelease      # needs the Android SDK, NDK 27.3 and CMake 3.31
-hosttest/run.sh                # tests; needs a JDK, CMake, Ninja, a C++17 compiler and kotlinc
+hosttest/run.sh                # desktop tests; needs a JDK, CMake, Ninja, a C++17 compiler and kotlinc
+tools/run_ui_tests.sh          # walkthrough on a running emulator or connected phone
 ```
 
 ## Licence
