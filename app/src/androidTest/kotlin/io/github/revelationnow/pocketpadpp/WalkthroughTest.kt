@@ -1056,19 +1056,18 @@ class WalkthroughTest {
         assertEquals("Ctrl+W closes it", 1, onUi { it.workspace.docs.size })
 
         // With suggestions on, the keyboard sends the whole word it is composing on every key press.
-        // (The pauses let the keyboard finish reconnecting, which would otherwise end the composition.)
-        fun connection() = onUi { it.editor.onCreateInputConnection(EditorInfo())!! }
-        setText("hello ")
-        sci(Sci.SCI_GOTOPOS, 6)
+        // The emulator's own keyboard would end a composition it did not start, so each step sets up the
+        // composed word and presses the key in one go, after a pause that lets the keyboard reconnect.
+        setText("hello wo")
+        sci(Sci.SCI_GOTOPOS, 8)
         onUi { it.editor.setClipboard("PASTE") }
         SystemClock.sleep(700)
-        val composing = connection()
-        onUi {
-            composing.setComposingText("w", 1)
-            composing.setComposingText("wo", 1)
-        }
         tap("Ctrl")
-        onUi { composing.setComposingText("wov", 1) }
+        onUi {
+            val composing = it.editor.onCreateInputConnection(EditorInfo())!!
+            composing.setComposingRegion(6, 8)
+            composing.setComposingText("wov", 1)
+        }
         assertEquals("Ctrl+V pastes in the middle of a composed word", "hello woPASTE", text())
         assertEquals(0, held())
         // The keyboard then adopts the word at the caret, as it does after a paste or a tap.
