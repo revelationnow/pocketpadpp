@@ -506,6 +506,30 @@ private fun testMoreEditOps() {
     sci.send(Sci.SCI_RELEASEDOCUMENT, 0, firstDoc)
     sci.send(Sci.SCI_RELEASEDOCUMENT, 0, secondDoc)
 
+    // Column Editor
+    eq(listOf("1", "1", "3", "3", "5"), TextTransforms.columnNumbers(5, 1, 2, 2, 10, TextTransforms.Leading.NONE), "numbers with increase and repeat")
+    eq(listOf("08", "09", "10"), TextTransforms.columnNumbers(3, 8, 1, 1, 10, TextTransforms.Leading.ZEROS), "leading zeros to the widest number")
+    eq(listOf(" e", " f", "10"), TextTransforms.columnNumbers(3, 14, 1, 1, 16, TextTransforms.Leading.SPACES), "hex with leading spaces")
+    eq(listOf("-1", "00", "01"), TextTransforms.columnNumbers(3, -1, 1, 1, 10, TextTransforms.Leading.ZEROS), "negative numbers keep their sign in front")
+    eq(listOf("111", "1000"), TextTransforms.columnNumbers(2, 7, 1, 1, 2, TextTransforms.Leading.NONE), "binary")
+    sci.setLexer("")
+    sci.send(Sci.SCI_SETVIRTUALSPACEOPTIONS, Sci.SCVS_RECTANGULARSELECTION.toLong())
+    sci.text = "abcdef\nab\nabcdef\n"
+    sci.send(Sci.SCI_SETRECTANGULARSELECTIONANCHOR, 2)
+    sci.send(Sci.SCI_SETRECTANGULARSELECTIONCARET, 14)
+    eq(3, EditOps.columnInsert(sci) { n -> List(n) { "X" } }, "column editor works on each line of the column")
+    eq("abXef\nabX\nabXef\n", sci.text, "selected parts replaced; short line just gets the text")
+    sci.send(Sci.SCI_UNDO)
+    eq("abcdef\nab\nabcdef\n", sci.text, "column editor is one undo step")
+    sci.send(Sci.SCI_SETRECTANGULARSELECTIONANCHOR, 4)
+    sci.send(Sci.SCI_SETRECTANGULARSELECTIONCARET, 14)
+    EditOps.columnInsert(sci) { n -> TextTransforms.columnNumbers(n, 1, 1, 1, 10, TextTransforms.Leading.NONE) }
+    eq("abcd1ef\nab  2\nabcd3ef\n", sci.text, "a zero-width column inserts, padding the short line with spaces")
+    sci.text = "one\n\nthree"
+    sci.send(Sci.SCI_GOTOPOS, 1)
+    eq(3, EditOps.columnInsert(sci) { n -> List(n) { "|" } }, "without a column selection: from the caret's line to the last")
+    eq("o|ne\n |\nt|hree", sci.text, "at the caret's column on every line")
+
     sci.text = "f(a, [b])"
     sci.send(Sci.SCI_GOTOPOS, 2)
     ok(EditOps.selectBetweenBraces(sci), "select between braces")

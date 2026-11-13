@@ -21,6 +21,11 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ArrayAdapter
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import io.github.revelationnow.pocketpadpp.app.Doc
@@ -409,6 +414,7 @@ class MainActivity : Activity() {
                 'N'.code -> showMainMenu("Encoding")
                 'L'.code -> showMainMenu("Language")
                 'T'.code -> showMainMenu("Settings")
+                'C'.code -> columnEditor()
                 '0'.code -> editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_CONTRACT.toLong())
                 in '1'.code..'8'.code -> EditOps.foldLevel(editor, key - '0'.code, collapse = true)
                 else -> return false
@@ -869,6 +875,8 @@ class MainActivity : Activity() {
         sub("On Selection") {
             item("Search on Internet") { searchOnInternet() }
         }
+        item("Column Mode...") { columnModeTip() }
+        item("Column Editor...") { columnEditor() }
         sub("Multi-select All") {
             item("Ignore Case & Whole Word") { EditOps.multiSelectAll(editor, matchCase = false, wholeWord = false) }
             item("Match Case Only") { EditOps.multiSelectAll(editor, matchCase = true, wholeWord = false) }
@@ -1162,6 +1170,94 @@ class MainActivity : Activity() {
                 val line = (input.text.toString().toLongOrNull() ?: current).coerceIn(1, lines) - 1
                 editor.send(Sci.SCI_ENSUREVISIBLEENFORCEPOLICY, line)
                 editor.send(Sci.SCI_GOTOLINE, line)
+                editor.requestFocus()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun columnModeTip() {
+        AlertDialog.Builder(themed)
+            .setTitle("Column Mode Tip")
+            .setMessage(
+                "There are three ways to select a column of text:\n\n" +
+                    "1. Tap Alt in the keys row, then drag a finger over the text. Tap Alt twice to keep it on.\n\n" +
+                    "2. Lock Alt and Shift (tap each twice), then use the arrow keys.\n\n" +
+                    "3. Put the caret at one corner, choose Edit > Begin/End Select in Column Mode, " +
+                    "move the caret to the opposite corner and choose it again.\n\n" +
+                    "Typing then goes to every line of the column, and Edit > Column Editor fills it with text or numbers.",
+            )
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    /** Notepad++'s Column Editor: the same text, or a series of numbers, on every line of a column. */
+    private fun columnEditor() {
+        fun label(text: String) = TextView(themed).apply {
+            this.text = text
+            setPadding(0, dp(10f), 0, 0)
+        }
+        fun field(name: String, value: String, number: Boolean) = EditText(themed).apply {
+            contentDescription = name
+            setText(value)
+            maxLines = 1
+            inputType = if (number) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
+            else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        fun choice(name: String, options: List<String>) = Spinner(themed).apply {
+            contentDescription = name
+            adapter = ArrayAdapter(themed, android.R.layout.simple_spinner_dropdown_item, options)
+        }
+        val textMode = RadioButton(themed).apply { text = "Text to Insert" }
+        val numberMode = RadioButton(themed).apply { text = "Number to Insert" }
+        val text = field("Text to insert", "", number = false)
+        val initial = field("Initial number", "1", number = true)
+        val increase = field("Increase by", "1", number = true)
+        val repeat = field("Repeat", "1", number = true)
+        val format = choice("Format", listOf("Dec", "Hex", "Oct", "Bin"))
+        val leading = choice("Leading", listOf("None", "Zeros", "Spaces"))
+        val numbers = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            for ((name, view) in listOf("Initial number" to initial, "Increase by" to increase, "Repeat" to repeat, "Format" to format, "Leading" to leading)) {
+                addView(label(name))
+                addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+        }
+        val modes = RadioGroup(themed).apply {
+            addView(textMode)
+            addView(numberMode)
+            setOnCheckedChangeListener { _, _ ->
+                text.visibility = if (textMode.isChecked) View.VISIBLE else View.GONE
+                numbers.visibility = if (numberMode.isChecked) View.VISIBLE else View.GONE
+            }
+        }
+        textMode.isChecked = true
+        val content = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(modes)
+            addView(text, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(numbers)
+        }
+        AlertDialog.Builder(themed)
+            .setTitle("Column Editor")
+            .setView(ScrollView(themed).apply { addView(content) })
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val lines = if (textMode.isChecked) {
+                    val value = text.text.toString()
+                    EditOps.columnInsert(editor) { count -> List(count) { value } }
+                } else {
+                    val base = listOf(10, 16, 8, 2)[format.selectedItemPosition.coerceIn(0, 3)]
+                    val pad = TextTransforms.Leading.entries[leading.selectedItemPosition.coerceIn(0, 2)]
+                    EditOps.columnInsert(editor) { count ->
+                        TextTransforms.columnNumbers(
+                            count, initial.text.toString().toLongOrNull() ?: 0, increase.text.toString().toLongOrNull() ?: 0,
+                            repeat.text.toString().toIntOrNull() ?: 1, base, pad,
+                        )
+                    }
+                }
+                toast("Column Editor: $lines lines")
                 editor.requestFocus()
             }
             .setNegativeButton(android.R.string.cancel, null)

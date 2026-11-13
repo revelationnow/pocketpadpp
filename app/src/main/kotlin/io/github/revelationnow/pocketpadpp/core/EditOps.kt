@@ -410,6 +410,56 @@ object EditOps {
         sci.send(Sci.SCI_GOTOPOS, sci.send(Sci.SCI_GETLINEINDENTPOSITION, line))
     }
 
+    /**
+     * Column Editor: puts one text on every line of the column selection, in place of what is selected there.
+     * Without a column selection the texts go on every line from the caret's down to the last one, at the
+     * caret's column, as in Notepad++; lines that are too short are padded with spaces.
+     * [texts] is asked once for as many texts as there are lines. Returns the number of lines changed.
+     */
+    fun columnInsert(sci: SciApi, texts: (Int) -> List<String>): Int {
+        class Slot(val start: Long, val end: Long, val padding: Long)
+        val slots = ArrayList<Slot>()
+        if (sci.send(Sci.SCI_SELECTIONISRECTANGLE) != 0L) {
+            val anchor = sci.send(Sci.SCI_GETRECTANGULARSELECTIONANCHOR)
+            val caret = sci.send(Sci.SCI_GETRECTANGULARSELECTIONCARET)
+            // The left edge of the rectangle, which may lie beyond the end of some of its lines.
+            val column = minOf(
+                sci.send(Sci.SCI_GETCOLUMN, anchor) + sci.send(Sci.SCI_GETRECTANGULARSELECTIONANCHORVIRTUALSPACE),
+                sci.send(Sci.SCI_GETCOLUMN, caret) + sci.send(Sci.SCI_GETRECTANGULARSELECTIONCARETVIRTUALSPACE),
+            )
+            val anchorLine = sci.send(Sci.SCI_LINEFROMPOSITION, anchor)
+            val caretLine = sci.send(Sci.SCI_LINEFROMPOSITION, caret)
+            for (line in minOf(anchorLine, caretLine)..maxOf(anchorLine, caretLine)) {
+                var start = sci.send(Sci.SCI_GETLINESELSTARTPOSITION, line)
+                var end = sci.send(Sci.SCI_GETLINESELENDPOSITION, line)
+                if (start < 0) {
+                    start = sci.send(Sci.SCI_GETLINEENDPOSITION, line)
+                    end = start
+                }
+                slots += Slot(start, end, (column - sci.send(Sci.SCI_GETCOLUMN, start)).coerceAtLeast(0))
+            }
+        } else {
+            val caret = sci.send(Sci.SCI_GETCURRENTPOS)
+            val column = sci.send(Sci.SCI_GETCOLUMN, caret)
+            for (line in sci.send(Sci.SCI_LINEFROMPOSITION, caret) until sci.send(Sci.SCI_GETLINECOUNT)) {
+                val position = sci.send(Sci.SCI_FINDCOLUMN, line, column)
+                slots += Slot(position, position, (column - sci.send(Sci.SCI_GETCOLUMN, position)).coerceAtLeast(0))
+            }
+        }
+        val all = texts(slots.size)
+        sci.send(Sci.SCI_BEGINUNDOACTION)
+        // From the bottom up, so that the positions noted above stay valid.
+        for (i in slots.indices.reversed()) {
+            val slot = slots[i]
+            val bytes = (" ".repeat(slot.padding.toInt()) + all.getOrElse(i) { "" }).toByteArray(Charsets.UTF_8)
+            sci.send(Sci.SCI_SETTARGETRANGE, slot.start, slot.end)
+            sci.sendBytes(Sci.SCI_REPLACETARGET, bytes.size.toLong(), bytes)
+        }
+        sci.send(Sci.SCI_ENDUNDOACTION)
+        slots.firstOrNull()?.let { sci.send(Sci.SCI_SETEMPTYSELECTION, it.start) }
+        return slots.size
+    }
+
     /** Character, word and line counts for View > Summary. */
     fun summary(sci: SciApi): Triple<Long, Long, Long> {
         val length = sci.send(Sci.SCI_GETLENGTH)

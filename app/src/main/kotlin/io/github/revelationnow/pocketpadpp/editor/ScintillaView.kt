@@ -117,7 +117,7 @@ class ScintillaView @JvmOverloads constructor(
     private var lastScrollTime = 0L
 
     // Touch state
-    private enum class Touch { NONE, PENDING, SCROLL, HANDLE, SELECT_DRAG, THUMB, ZOOM }
+    private enum class Touch { NONE, PENDING, SCROLL, HANDLE, SELECT_DRAG, THUMB, ZOOM, COLUMN }
 
     private var touch = Touch.NONE
     private var downX = 0f
@@ -518,8 +518,11 @@ class ScintillaView @JvmOverloads constructor(
         canvas.drawPath(handlePath, handlePaint)
     }
 
+    /** One ordinary selection, as opposed to a column selection or several carets, which have no handles. */
+    private fun plainSelection() = send(Sci.SCI_GETSELECTIONS) == 1L && send(Sci.SCI_SELECTIONISRECTANGLE) == 0L
+
     private fun drawHandles(canvas: Canvas) {
-        if (!hasFocus()) return
+        if (!hasFocus() || !plainSelection()) return
         if (hasSelection()) {
             val start = selectionStart()
             val end = selectionEnd()
@@ -542,6 +545,7 @@ class ScintillaView @JvmOverloads constructor(
 
     /** Starts dragging a handle if the touch landed on one. */
     private fun tryGrabHandle(x: Float, y: Float): Boolean {
+        if (!plainSelection()) return false
         val moving: Long
         if (hasSelection()) {
             val start = selectionStart()
@@ -590,7 +594,7 @@ class ScintillaView @JvmOverloads constructor(
     /** While a drag is held near the top or bottom edge, keep scrolling and extending the selection. */
     private val edgeScroll = object : Runnable {
         override fun run() {
-            if (ptr == 0L || (touch != Touch.HANDLE && touch != Touch.SELECT_DRAG)) return
+            if (ptr == 0L || (touch != Touch.HANDLE && touch != Touch.SELECT_DRAG && touch != Touch.COLUMN)) return
             val step = when {
                 lastY < edgeZone -> -((edgeZone - lastY) / 3f).roundToInt().coerceAtLeast(1)
                 lastY > height - edgeZone -> ((lastY - (height - edgeZone)) / 3f).roundToInt().coerceAtLeast(1)
@@ -598,7 +602,11 @@ class ScintillaView @JvmOverloads constructor(
             }
             if (step != 0) {
                 scrollTextYTo(scrollYPixels() + step)
-                if (touch == Touch.HANDLE) dragHandleTo(lastX, lastY) else dragSelectionTo(lastX, lastY)
+                when (touch) {
+                    Touch.HANDLE -> dragHandleTo(lastX, lastY)
+                    Touch.COLUMN -> ScintillaNative.mouseMove(ptr, lastX, lastY + fracY, android.os.SystemClock.uptimeMillis(), Sci.SCMOD_ALT)
+                    else -> dragSelectionTo(lastX, lastY)
+                }
                 handler.postDelayed(this, 16)
             }
         }
@@ -651,6 +659,11 @@ class ScintillaView @JvmOverloads constructor(
                 } else if (tryGrabHandle(x, y)) {
                     touch = Touch.HANDLE
                     actionMode?.finish()
+                } else if (softModifiers and Sci.SCMOD_ALT != 0 && softModifiers and Sci.SCMOD_CTRL == 0 && x >= marginsWidth()) {
+                    // Alt held on screen: dragging selects a column, as Alt and the mouse do in Notepad++.
+                    touch = Touch.COLUMN
+                    actionMode?.finish()
+                    ScintillaNative.mouseDown(ptr, x, y + fracY, event.eventTime, Sci.SCMOD_ALT)
                 } else {
                     touch = Touch.PENDING
                     handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
@@ -667,6 +680,11 @@ class ScintillaView @JvmOverloads constructor(
                 when (touch) {
                     Touch.THUMB -> dragThumbTo(y)
                     Touch.ZOOM -> pinchTo(event)
+                    Touch.COLUMN -> {
+                        ScintillaNative.mouseMove(ptr, x, y + fracY, event.eventTime, Sci.SCMOD_ALT)
+                        lastX = x; lastY = y
+                        updateEdgeScroll()
+                    }
                     Touch.PENDING -> if (abs(x - downX) > touchSlop || abs(y - downY) > touchSlop) {
                         handler.removeCallbacks(longPress)
                         touch = Touch.SCROLL
@@ -696,6 +714,11 @@ class ScintillaView @JvmOverloads constructor(
                     Touch.SCROLL -> fling()
                     Touch.HANDLE, Touch.SELECT_DRAG -> if (hasSelection()) showActionMode()
                     Touch.THUMB -> lastScrollTime = android.os.SystemClock.uptimeMillis()
+                    Touch.COLUMN -> {
+                        ScintillaNative.mouseUp(ptr, x, y + fracY, event.eventTime, Sci.SCMOD_ALT)
+                        if (hasSelection() || send(Sci.SCI_GETSELECTIONS) > 1) showActionMode()
+                        onSoftModifiersUsed?.invoke()
+                    }
                     Touch.ZOOM, Touch.NONE -> {}
                 }
                 touch = Touch.NONE
@@ -707,6 +730,7 @@ class ScintillaView @JvmOverloads constructor(
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longPress)
                 handler.removeCallbacks(edgeScroll)
+                if (touch == Touch.COLUMN) ScintillaNative.mouseUp(ptr, x, y + fracY, event.eventTime, Sci.SCMOD_ALT)
                 touch = Touch.NONE
                 velocityTracker?.recycle()
                 velocityTracker = null
@@ -1035,6 +1059,9 @@ class ScintillaView @JvmOverloads constructor(
         send(Sci.SCI_SETMULTIPLESELECTION, 1)
         send(Sci.SCI_SETADDITIONALSELECTIONTYPING, 1)
         send(Sci.SCI_SETMULTIPASTE, Sci.SC_MULTIPASTE_EACH.toLong())
+        // Column selections: made with Alt, and free to reach beyond the ends of short lines, as in Notepad++.
+        send(Sci.SCI_SETRECTANGULARSELECTIONMODIFIER, Sci.SCMOD_ALT.toLong())
+        send(Sci.SCI_SETVIRTUALSPACEOPTIONS, Sci.SCVS_RECTANGULARSELECTION.toLong())
         send(Sci.SCI_SETEXTRAASCENT, density.roundToInt().toLong())
         send(Sci.SCI_SETEXTRADESCENT, density.roundToInt().toLong())
         // Scintilla draws visible spaces as dots one pixel wide by default, which a phone screen swallows.

@@ -24,7 +24,9 @@ and saves a screenshot at every step. It covers:
 - find, count, replace all with a regular expression, single undo
 - touch: drag scrolling, fling, tap, double tap, long press, selection handles, pinch zoom, the scroll thumb
 - the on-screen Ctrl, Alt and Shift keys: one-shot and locked, Notepad++'s shortcuts, Alt + letter for menus,
-  column selection with Alt+Shift+arrows, and a shortcut from a hardware keyboard
+  shortcuts while a suggestion keyboard is composing a word or typing over a selection, and a shortcut
+  from a hardware keyboard
+- column selection by dragging with Alt held and with Alt+Shift+arrows, and the Column Editor with text and numbers
 - highlighting for C++, Python, HTML and JSON
 
 To run it yourself, start an emulator or plug in a phone with USB debugging and run `tools/run_ui_tests.sh`.

@@ -164,6 +164,29 @@ object TextTransforms {
             keyed.filter { it.second != null }.sortedBy { it.second }.map { it.first }
     }
 
+    enum class Leading { NONE, ZEROS, SPACES }
+
+    /**
+     * The Column Editor's number series: [count] numbers starting at [initial], growing by [increase] after
+     * every [repeat] lines, written in [base] (10, 16, 8 or 2) and padded to the width of the widest one.
+     */
+    fun columnNumbers(count: Int, initial: Long, increase: Long, repeat: Int, base: Int, leading: Leading): List<String> {
+        val step = repeat.coerceAtLeast(1)
+        val digits = List(count) { index ->
+            val value = initial + (index / step) * increase
+            (value < 0) to java.lang.Long.toString(kotlin.math.abs(value), base)
+        }
+        val width = digits.maxOfOrNull { (negative, text) -> text.length + if (negative) 1 else 0 } ?: 0
+        return digits.map { (negative, text) ->
+            val sign = if (negative) "-" else ""
+            when (leading) {
+                Leading.NONE -> sign + text
+                Leading.ZEROS -> sign + text.padStart(width - sign.length, '0')
+                Leading.SPACES -> (sign + text).padStart(width)
+            }
+        }
+    }
+
     fun removeConsecutiveDuplicates(lines: List<String>): List<String> =
         lines.filterIndexed { index, line -> index == 0 || line != lines[index - 1] }
 }

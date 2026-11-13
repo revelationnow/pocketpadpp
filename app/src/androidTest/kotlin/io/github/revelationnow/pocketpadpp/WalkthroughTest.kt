@@ -1215,6 +1215,74 @@ class WalkthroughTest {
         tapButton("Cancel")
     }
 
+    @Test
+    fun columnSelectionAndColumnEditor() {
+        fun held() = onUi { it.editor.softModifiers }
+        val original = "abcdefgh\nabcdefgh\nab\nabcdefgh\n"
+        setText(original)
+        SystemClock.sleep(500)
+
+        // Alt, then a drag, selects a column instead of scrolling.
+        tap("Alt")
+        val (fromX, fromY) = pointOf(2)
+        val (toX, toY) = pointOf(26)
+        drag(fromX, fromY, toX, toY)
+        device.waitForIdle()
+        shot("column-drag")
+        assertTrue("dragging with Alt held makes a column selection", sci(Sci.SCI_SELECTIONISRECTANGLE) != 0L)
+        assertEquals("one piece per line", 4L, sci(Sci.SCI_GETSELECTIONS))
+        assertEquals("columns 2 to 5 of the first line", 2L to 5L,
+            sci(Sci.SCI_GETLINESELSTARTPOSITION, 0) to sci(Sci.SCI_GETLINESELENDPOSITION, 0))
+        assertEquals("nothing scrolled", 0L, sci(Sci.SCI_GETFIRSTVISIBLELINE))
+        assertEquals("Alt lets go after the drag", 0, held())
+        onUi { it.editor.typeText("-") }
+        assertEquals("typing replaces the column on every line, short lines included",
+            "ab-fgh\nab-fgh\nab-\nab-fgh\n", text())
+        var undos = 0
+        while (text() != original && sci(Sci.SCI_CANUNDO) != 0L && undos++ < 10) sci(Sci.SCI_UNDO)
+        assertEquals(original, text())
+
+        // Locked, Alt stays on for the next drag as well.
+        tap("Alt")
+        tap("Alt")
+        drag(fromX, fromY, toX, toY)
+        assertTrue(sci(Sci.SCI_SELECTIONISRECTANGLE) != 0L)
+        assertEquals(Sci.SCMOD_ALT, held())
+        tap("Alt")
+        assertEquals(0, held())
+
+        // The Column Editor fills the column with a text...
+        openMenu("Edit", "Column Mode...")
+        assertTrue(onScreen("Column Mode Tip"))
+        shot("column-mode-tip")
+        tapButton("OK")
+        sci(Sci.SCI_SETRECTANGULARSELECTIONANCHOR, 2)
+        sci(Sci.SCI_SETRECTANGULARSELECTIONCARET, 26)
+        openMenu("Edit", "Column Editor...")
+        assertTrue(onScreen("Column Editor"))
+        device.wait(Until.findObject(By.desc("Text to insert")), 4000)!!.text = "XY"
+        shot("column-editor-text")
+        tapButton("OK")
+        assertEquals("abXYfgh\nabXYfgh\nabXY\nabXYfgh\n", text())
+
+        // ...or with numbers; without a selection it runs from the caret's line to the end. Alt+C opens it too.
+        sci(Sci.SCI_GOTOPOS, 0)
+        tap("Alt")
+        onUi { it.editor.onCreateInputConnection(EditorInfo())!!.commitText("c", 1) }
+        assertTrue("Alt+C opens the Column Editor", onScreen("Column Editor"))
+        tap("Number to Insert")
+        device.wait(Until.findObject(By.desc("Initial number")), 4000)!!.text = "9"
+        device.findObject(By.clazz("android.widget.ScrollView"))?.scroll(Direction.DOWN, 1f)
+        device.waitForIdle()
+        tapDescribed("Leading")
+        tap("Zeros")
+        shot("column-editor-numbers")
+        tapButton("OK")
+        assertEquals("09abXYfgh\n10abXYfgh\n11abXY\n12abXYfgh\n13", text())
+        sci(Sci.SCI_UNDO)
+        assertEquals("the Column Editor is one undo step", "abXYfgh\nabXYfgh\nabXY\nabXYfgh\n", text())
+    }
+
     private companion object {
         const val TAG = "PocketpadTest"
         var shots = 0
