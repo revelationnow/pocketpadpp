@@ -15,3 +15,11 @@ The Android platform layer lives in `app/src/main/cpp/`.
 
 To update: copy the same directories from a newer Notepad++ checkout, then run
 `python3 tools/gen_constants.py` and `hosttest/run.sh`.
+
+## Notepad++ data files
+
+`app/src/main/assets/npp/langs.model.xml` and `stylers.model.xml` are Notepad++'s language
+definitions (extensions, keywords, comment markers) and default colour theme, copied unmodified
+from the same commit and licensed under the GPL version 3 like the rest of Notepad++.
+`languages.tsv` beside them is generated from Notepad++'s source code by
+`tools/gen_npp_tables.py`, which also refreshes the two XML files.

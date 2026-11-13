@@ -17,3 +17,13 @@ javac -Xlint:all -d "$build/classes" \
 # CHECK_JNI=1 adds the JVM's JNI checker (slow, and noisy about the JDK's own font code).
 java -Djava.awt.headless=true -Djava.library.path="$build" ${CHECK_JNI:+-Xcheck:jni} \
     -cp "$build/classes" host.Harness "$here/out"
+
+# Application logic tests (Kotlin, no Android classes) against the same native editor.
+if command -v kotlinc >/dev/null 2>&1; then
+    kotlinc -nowarn -jvm-target 17 -cp "$build/classes" -d "$build/core-tests.jar" -include-runtime \
+        "$root"/app/src/main/kotlin/io/github/revelationnow/pocketpadpp/core/*.kt "$here"/kotlin/*.kt
+    java -Djava.awt.headless=true -Djava.library.path="$build" \
+        -cp "$build/core-tests.jar:$build/classes" host.CoreTestsKt "$root/app/src/main/assets/npp"
+else
+    echo "kotlinc not found: skipping the Kotlin core tests" >&2
+fi
