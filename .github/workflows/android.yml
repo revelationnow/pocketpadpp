@@ -34,6 +34,8 @@ jobs:
     name: UI tests (emulator)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -65,6 +67,20 @@ jobs:
           name: ui-test-output
           path: ui-test-output/
           if-no-files-found: ignore
+      # The same files as a release download, which is easier to fetch than a workflow artifact.
+      - name: Publish screenshots
+        if: always() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -d ui-test-output ] || exit 0
+          tar czf ui-test-output.tar.gz ui-test-output
+          gh release delete ui-test-latest --yes --cleanup-tag || true
+          gh release create ui-test-latest ui-test-output.tar.gz \
+            --prerelease --latest=false \
+            --target "$GITHUB_SHA" \
+            --title "UI test screenshots $GITHUB_RUN_NUMBER" \
+            --notes "Screenshots, logs and reports from the emulator walkthrough of $GITHUB_REF_NAME at ${GITHUB_SHA::7}. Not a release."
 
   apk:
     name: Build APK

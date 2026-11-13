@@ -26,7 +26,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestName
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.regex.Pattern
@@ -45,19 +47,50 @@ class WalkthroughTest {
     private val context: Context = instrumentation.targetContext
     private lateinit var scenario: ActivityScenario<MainActivity>
 
+    @get:Rule
+    val testName = TestName()
+
     @Before
     fun launchClean() {
         // Start every test from a fresh install's state.
         File(context.filesDir, "session.xml").delete()
         File(context.filesDir, "backup").deleteRecursively()
         context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
+        // A freshly booted emulator can still be showing its lock screen or a "not responding" notice.
+        device.wakeUp()
+        device.executeShellCommand("wm dismiss-keyguard")
+        device.executeShellCommand("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS")
         scenario = ActivityScenario.launch(MainActivity::class.java)
         device.waitForIdle()
+        clearSystemNotices()
+        if (device.wait(Until.hasObject(By.pkg(context.packageName).depth(0)), 15000) != true) {
+            logFocus("app window not found")
+        }
     }
 
     @After
     fun close() {
+        // The state each test ended in, which is what explains a failure.
+        logFocus("end of ${testName.methodName}")
+        shot("end-${testName.methodName}")
         scenario.close()
+    }
+
+    private fun clearSystemNotices() {
+        repeat(3) {
+            val notice = device.findObject(By.text(Pattern.compile(".*(isn't responding|keeps stopping).*"))) ?: return
+            Log.w(TAG, "system notice on screen: ${notice.text}")
+            (device.findObject(By.text(Pattern.compile("wait", Pattern.CASE_INSENSITIVE)))
+                ?: device.findObject(By.text(Pattern.compile("close app", Pattern.CASE_INSENSITIVE))))?.click()
+            device.waitForIdle()
+            SystemClock.sleep(500)
+        }
+    }
+
+    private fun logFocus(label: String) {
+        val focus = device.executeShellCommand("dumpsys window displays").lineSequence()
+            .filter { "mCurrentFocus" in it || "mFocusedApp" in it }.joinToString(" | ") { it.trim() }
+        Log.i(TAG, "$label: $focus")
     }
 
     // region Helpers
