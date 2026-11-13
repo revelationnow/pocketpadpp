@@ -21,8 +21,8 @@ platform layer written for Android, with touch selection, smooth scrolling and s
 ## Try it
 
 Every push builds an APK. The newest one is attached to the
-[spike-latest pre-release](../../releases/tag/spike-latest); open that page on
-your phone, download `pocketpadpp-spike.apk` and install it (Android 8.0 or
+[dev-latest pre-release](../../releases/tag/dev-latest); open that page on
+your phone, download `pocketpadpp-dev.apk` and install it (Android 8.0 or
 newer, 64-bit). Builds are signed with the public development key in this
 repository, so they update each other but are not store releases.
 

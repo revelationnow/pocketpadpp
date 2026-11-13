@@ -45,11 +45,11 @@ jobs:
       - name: Build
         run: ./gradlew --no-daemon --stacktrace assembleRelease
       - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk pocketpadpp-spike.apk
+        run: cp app/build/outputs/apk/release/app-release.apk pocketpadpp-dev.apk
       - uses: actions/upload-artifact@v6
         with:
-          name: pocketpadpp-spike-apk
-          path: pocketpadpp-spike.apk
+          name: pocketpadpp-dev-apk
+          path: pocketpadpp-dev.apk
       # A rolling pre-release gives the phone a direct download link for the newest build.
       - name: Publish rolling pre-release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/scintilla-spike')
@@ -57,8 +57,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete spike-latest --yes --cleanup-tag || true
-          gh release create spike-latest pocketpadpp-spike.apk \
+          gh release delete dev-latest --yes --cleanup-tag || true
+          gh release create dev-latest pocketpadpp-dev.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "Scintilla spike (build $GITHUB_RUN_NUMBER)" \
-            --notes "Automatic development build of the Scintilla-on-Android spike from $GITHUB_REF_NAME at ${GITHUB_SHA::7}. Signed with the public development key in the repository. Not a release."
+            --title "Development build $GITHUB_RUN_NUMBER" \
+            --notes "Automatic development build from $GITHUB_REF_NAME at ${GITHUB_SHA::7}. Signed with the public development key in the repository. Not a release."

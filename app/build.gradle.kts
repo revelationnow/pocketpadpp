@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = buildNumber
-        versionName = "0.0.$buildNumber-spike"
+        versionName = "0.1.$buildNumber-dev"
 
         ndk {
             // 64-bit phones and emulators. 32-bit ARM can be added when someone needs it.
