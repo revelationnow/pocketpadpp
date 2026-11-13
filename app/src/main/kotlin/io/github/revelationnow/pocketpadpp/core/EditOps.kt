@@ -238,6 +238,10 @@ object EditOps {
     fun multiSelectAll(sci: SciApi, matchCase: Boolean, wholeWord: Boolean) {
         sci.send(Sci.SCI_SETSEARCHFLAGS, searchFlags(matchCase, wholeWord))
         sci.send(Sci.SCI_TARGETWHOLEDOCUMENT)
+        // With nothing selected Scintilla's first step only selects the word at the caret;
+        // Notepad++ selects that word and then carries on.
+        if (sci.send(Sci.SCI_GETSELECTIONEMPTY) != 0L) sci.send(Sci.SCI_MULTIPLESELECTADDNEXT)
+        if (sci.send(Sci.SCI_GETSELECTIONEMPTY) != 0L) return
         sci.send(Sci.SCI_MULTIPLESELECTADDEACH)
     }
 
@@ -245,6 +249,7 @@ object EditOps {
     fun multiSelectNext(sci: SciApi, matchCase: Boolean, wholeWord: Boolean) {
         sci.send(Sci.SCI_SETSEARCHFLAGS, searchFlags(matchCase, wholeWord))
         sci.send(Sci.SCI_TARGETWHOLEDOCUMENT)
+        // As in Notepad++, with nothing selected the first use selects the word at the caret.
         sci.send(Sci.SCI_MULTIPLESELECTADDNEXT)
     }
 

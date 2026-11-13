@@ -103,7 +103,9 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(textColour)
-            maxLines = 1
+            // Long paths lose their start, never the name of the level being shown.
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.START
             setPadding(dp(4f), 0, dp(12f), 0)
         }
         header.addView(backButton, LinearLayout.LayoutParams(dp(48f), dp(48f)))
@@ -140,7 +142,9 @@ class MenuSheet(private val context: Context, private val dark: Boolean = false)
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setGravity(Gravity.BOTTOM)
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            // A light dim sets the menu apart from the editor and keyboard behind it.
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.25f)
             // Leave the soft keyboard as it is.
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED)
             setFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM, WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)

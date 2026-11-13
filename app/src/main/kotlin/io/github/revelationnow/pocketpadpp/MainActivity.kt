@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -134,6 +135,12 @@ class MainActivity : Activity() {
         root.addView(extraKeys(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42f)))
         root.addView(statusBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         setContentView(root)
+        // The strip behind the system's navigation bar matches the status bar above it.
+        window.navigationBarColor = CHROME
+        if (Build.VERSION.SDK_INT >= 27) {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
 
         // Notepad++'s own language and style definitions, shipped as assets.
         val languages = assets.open("npp/languages.tsv").use { table ->

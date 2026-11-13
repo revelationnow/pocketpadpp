@@ -378,7 +378,9 @@ class ScintillaView @JvmOverloads constructor(
         val cx = handleCentreX(xOf(position), kind)
         val cy = bottomOf(position) + handleRadius
         val reach = handleRadius * 2f
-        return abs(x - cx) <= reach && abs(y - cy) <= reach
+        // Only the part that hangs below the text counts. A touch on the line itself is a tap on the text;
+        // otherwise the second tap of a double tap would pick up the handle the first tap brought out.
+        return abs(x - cx) <= reach && y >= bottomOf(position) - handleRadius * 0.25f && y - cy <= reach
     }
 
     /** Starts dragging a handle if the touch landed on one. */

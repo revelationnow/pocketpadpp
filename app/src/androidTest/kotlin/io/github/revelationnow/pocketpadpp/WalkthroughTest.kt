@@ -18,7 +18,7 @@ import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
-import io.github.revelationnow.pocketpadpp.core.sendText
+import io.github.revelationnow.pocketpadpp.editor.ScintillaView
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -306,9 +306,17 @@ class WalkthroughTest {
         assertTrue("the tab is marked as modified", onUi { it.workspace.isDirty(it.workspace.active) })
         shot("typed")
 
-        sci(Sci.SCI_UNDO)
-        sci(Sci.SCI_UNDO)
-        assertTrue("undo works after keyboard input", text().length < "if (ready) {\n\thello\n\tworldx\n\t".length)
+        // Everything typed can be undone and redone, in a sensible number of steps.
+        var steps = 0
+        while (sci(Sci.SCI_CANUNDO) != 0L && steps < 100) {
+            sci(Sci.SCI_UNDO)
+            steps++
+        }
+        Log.i(TAG, "typing took $steps undo steps")
+        assertEquals("undo takes back everything that was typed", "", text())
+        assertTrue("typing is grouped into a few undo steps, not one per keystroke ($steps)", steps in 2..20)
+        while (sci(Sci.SCI_CANREDO) != 0L) sci(Sci.SCI_REDO)
+        assertEquals("redo brings it all back", "if (ready) {\n\thello\n\tworldx\n\t", text())
     }
 
     @Test
@@ -633,6 +641,150 @@ class WalkthroughTest {
         shot("multi-select")
         openMenu("View", "Zoom", "Zoom In")
         assertEquals(1L, sci(Sci.SCI_GETZOOM))
+    }
+
+    @Test
+    fun viewAndSettingsToggles() {
+        setText("int main() {\n\tif (a) {\n\t\tb();\n\t}\n\treturn 0;\n}\n", "cpp")
+        sci(Sci.SCI_COLOURISE, 0, -1)
+
+        // Settings
+        val numbersWidth = sci(Sci.SCI_GETMARGINWIDTHN, 0)
+        assertTrue("line numbers are shown by default", numbersWidth > 0)
+        openMenu("Settings", "Show line numbers")
+        assertEquals("line numbers hidden", 0L, sci(Sci.SCI_GETMARGINWIDTHN, 0))
+        shot("settings-no-line-numbers")
+        menu("Show line numbers")
+        assertEquals("line numbers back", numbersWidth, sci(Sci.SCI_GETMARGINWIDTHN, 0))
+        menu("Keyboard suggestions and autocorrect")
+        assertEquals(ScintillaView.KeyboardMode.TEXT, onUi { it.editor.keyboardMode })
+        menu("Keyboard suggestions and autocorrect")
+        assertEquals(ScintillaView.KeyboardMode.CODE, onUi { it.editor.keyboardMode })
+        tapDescribed("Close menu")
+        val size = sci(Sci.SCI_STYLEGETSIZE, Sci.STYLE_DEFAULT.toLong())
+        openMenu("Settings", "Bigger text")
+        openMenu("Settings", "Bigger text")
+        assertEquals("bigger text", size + 2, sci(Sci.SCI_STYLEGETSIZE, Sci.STYLE_DEFAULT.toLong()))
+        shot("settings-bigger-text")
+        openMenu("Settings", "Smaller text")
+        openMenu("Settings", "Smaller text")
+        assertEquals("smaller text", size, sci(Sci.SCI_STYLEGETSIZE, Sci.STYLE_DEFAULT.toLong()))
+
+        // View: folding
+        openMenu("View", "Fold All")
+        assertEquals("fold all hides the function body", 0L, sci(Sci.SCI_GETLINEVISIBLE, 1))
+        shot("view-fold-all")
+        openMenu("View", "Unfold All")
+        assertEquals("unfold all shows it again", 1L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+        openMenu("View", "Fold Level", "2")
+        assertEquals("fold level 2 hides the inner block only", listOf(1L, 0L),
+            listOf(sci(Sci.SCI_GETLINEVISIBLE, 1), sci(Sci.SCI_GETLINEVISIBLE, 2)))
+        shot("view-fold-level-2")
+        openMenu("View", "Unfold Level", "2")
+        assertEquals(1L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+        sci(Sci.SCI_GOTOPOS, 20)
+        openMenu("View", "Fold Current Level")
+        assertEquals("fold current level", 0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+        openMenu("View", "Unfold Current Level")
+        assertEquals("unfold current level", 1L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+
+        // View: symbols, wrap, zoom
+        openMenu("View", "Show Symbol", "Show Indent Guide")
+        assertEquals("indent guides off", Sci.SC_IV_NONE.toLong(), sci(Sci.SCI_GETINDENTATIONGUIDES))
+        menu("Show Indent Guide")
+        assertTrue("indent guides on", sci(Sci.SCI_GETINDENTATIONGUIDES) != Sci.SC_IV_NONE.toLong())
+        menu("Show Wrap Symbol")
+        assertEquals(Sci.SC_WRAPVISUALFLAG_END.toLong(), sci(Sci.SCI_GETWRAPVISUALFLAGS))
+        tapDescribed("Back")
+        menu("Word wrap")
+        assertEquals(Sci.SC_WRAP_WORD.toLong(), sci(Sci.SCI_GETWRAPMODE))
+        tapDescribed("Close menu")
+        setText("A long line that has to wrap around on a phone screen because it does not fit: " + "word ".repeat(30) + "\nshort\n")
+        shot("view-word-wrap")
+        assertTrue("the long line takes several rows", sci(Sci.SCI_WRAPCOUNT, 0) > 1)
+        openMenu("View", "Word wrap")
+        assertEquals(Sci.SC_WRAP_NONE.toLong(), sci(Sci.SCI_GETWRAPMODE))
+        tapDescribed("Close menu")
+        openMenu("View", "Zoom", "Zoom In")
+        openMenu("View", "Zoom", "Zoom In")
+        assertEquals(2L, sci(Sci.SCI_GETZOOM))
+        shot("view-zoomed-in")
+        openMenu("View", "Zoom", "Zoom Out")
+        assertEquals(1L, sci(Sci.SCI_GETZOOM))
+        openMenu("View", "Zoom", "Restore Default Zoom")
+        assertEquals(0L, sci(Sci.SCI_GETZOOM))
+
+        // Edit: read-only
+        openMenu("Edit", "Read-Only")
+        tapDescribed("Close menu")
+        assertEquals(1L, sci(Sci.SCI_GETREADONLY))
+        val before = text()
+        onUi { it.editor.typeText("x") }
+        assertEquals("a read-only document cannot be typed into", before, text())
+        shot("read-only")
+        openMenu("Edit", "Read-Only")
+        tapDescribed("Close menu")
+        assertEquals(0L, sci(Sci.SCI_GETREADONLY))
+
+        // Settings survive a restart.
+        openMenu("View", "Word wrap")
+        tapDescribed("Close menu")
+        openMenu("Settings", "Show line numbers")
+        tapDescribed("Close menu")
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        device.waitForIdle()
+        assertEquals("word wrap is remembered", Sci.SC_WRAP_WORD.toLong(), sci(Sci.SCI_GETWRAPMODE))
+        assertEquals("hidden line numbers are remembered", 0L, sci(Sci.SCI_GETMARGINWIDTHN, 0))
+    }
+
+    @Test
+    fun tabCommands() {
+        fun names() = onUi { activity -> activity.workspace.docs.map { it.name } }
+        fun active() = onUi { it.workspace.active.name }
+        tap("New")
+        tap("New")
+        tap("New")
+        assertEquals(listOf("new 1", "new 2", "new 3", "new 4"), names())
+        assertEquals("new 4", active())
+
+        openMenu("View", "Tab", "First Tab")
+        assertEquals("new 1", active())
+        openMenu("View", "Tab", "Next Tab")
+        assertEquals("new 2", active())
+        openMenu("View", "Tab", "Previous Tab")
+        openMenu("View", "Tab", "Previous Tab")
+        assertEquals("previous wraps around", "new 4", active())
+        openMenu("View", "Tab", "Move to Start")
+        assertEquals(listOf("new 4", "new 1", "new 2", "new 3"), names())
+        openMenu("View", "Tab", "Move Tab Forward")
+        assertEquals(listOf("new 1", "new 4", "new 2", "new 3"), names())
+        shot("tabs-moved")
+
+        // Long press on a tab opens its own menu.
+        find("new 2").longClick()
+        device.waitForIdle()
+        assertTrue("tab menu opened", onScreen("Close All but This"))
+        shot("tab-menu")
+        menu("Close All to the Right")
+        assertEquals(listOf("new 1", "new 4", "new 2"), names())
+        tapDescribed("Close new 4")
+        assertEquals("an unchanged tab closes without asking", listOf("new 1", "new 2"), names())
+
+        // Unsaved tabs each ask before Close All discards them.
+        onUi { it.editor.typeText("keep?") }
+        openMenu("File", "Close All")
+        assertTrue("asks about the modified tab", onScreen("Save file \"${active()}\"?"))
+        tapButton("Cancel")
+        assertEquals("cancel stops closing", 1, names().count { it == active() })
+        tap("New")
+        openMenu("File", "Close Multiple Documents", "Close All Unchanged")
+        assertEquals("only the modified tab is left", 1, names().size)
+        shot("tabs-after-close-unchanged")
+        openMenu("File", "Close")
+        tapButton("No")
+        assertEquals("closing the last tab leaves one empty tab", listOf("new 1"), names())
+        assertEquals("", text())
     }
 
     private companion object {
