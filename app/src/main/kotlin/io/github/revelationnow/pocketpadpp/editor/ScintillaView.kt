@@ -1,0 +1,828 @@
+package io.github.revelationnow.pocketpadpp.editor
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
+import android.util.AttributeSet
+import android.util.TypedValue
+import android.view.ActionMode
+import android.view.HapticFeedbackConstants
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
+import android.view.Menu
+import android.view.MenuItem
+import android.view.MotionEvent
+import android.view.VelocityTracker
+import android.view.View
+import android.view.ViewConfiguration
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
+import android.widget.OverScroller
+import io.github.revelationnow.pocketpadpp.scintilla.Sci
+import io.github.revelationnow.pocketpadpp.scintilla.SciHost
+import io.github.revelationnow.pocketpadpp.scintilla.ScintillaNative
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+/**
+ * A Scintilla editor as an Android view.
+ *
+ * Scintilla does the editing, layout and painting. This class supplies what a phone needs on top:
+ * pixel-smooth touch scrolling and flinging, tap / double-tap / long-press selection with draggable
+ * handles, a floating cut-copy-paste toolbar, and the soft keyboard connection.
+ */
+class ScintillaView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+) : View(context, attrs), SciHost {
+
+    /** How the soft keyboard is asked to behave. */
+    enum class KeyboardMode {
+        /** No suggestions, autocorrect or swipe typing: every key press arrives as typed. Best for code. */
+        CODE,
+
+        /** Suggestions, autocorrect and swipe typing, using composing text. Best for prose. */
+        TEXT,
+    }
+
+    private var ptr: Long = 0
+    private val surface = AndroidSurface.forView()
+    private val handler = Handler(Looper.getMainLooper())
+    private val density = resources.displayMetrics.density
+    private val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+    private val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+    /** Called after the caret, selection, text or scroll position changed. Safe to query the editor from here. */
+    var onStateChanged: (() -> Unit)? = null
+
+    /** Receives one line per soft keyboard request, for diagnosing keyboard behaviour. */
+    var imeLog: ((String) -> Unit)? = null
+
+    var keyboardMode: KeyboardMode = KeyboardMode.CODE
+        set(value) {
+            if (field != value) {
+                field = value
+                if (ptr != 0L) ScintillaNative.imeFinishComposing(ptr)
+                imm.restartInput(this)
+            }
+        }
+
+    // Scrolling. Scintilla scrolls vertically by whole lines, so the view shifts the painted content up by
+    // [fracY] pixels within the first visible line and gives Scintilla a client area one line taller than the view.
+    private var lineHeight = 1
+    private var fracY = 0
+    private val scroller = OverScroller(context)
+    private var velocityTracker: VelocityTracker? = null
+    private val viewConfig = ViewConfiguration.get(context)
+    private val touchSlop = viewConfig.scaledTouchSlop
+    private var lastScrollTime = 0L
+
+    // Touch state
+    private enum class Touch { NONE, PENDING, SCROLL, HANDLE, SELECT_DRAG }
+
+    private var touch = Touch.NONE
+    private var downX = 0f
+    private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var downTime = 0L
+    private var scrollHorizontal = false
+    private var dragFixed = 0L          // The selection end that stays put while a handle is dragged.
+    private var dragOffsetX = 0f        // From the finger to the text point the handle stands for.
+    private var dragOffsetY = 0f
+    private var dragWordStart = 0L      // Word picked by the long press that started a selection drag.
+    private var dragWordEnd = 0L
+    private var caretHandleUntil = 0L   // Uptime until which the insertion handle stays visible.
+
+    private val handleRadius = 11f * density
+    private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2A7BDE.toInt() }
+    private val handlePath = Path()
+    private val scrollBarPaint = Paint().apply { color = 0x66000000 }
+    private val edgeZone = 48f * density
+
+    private var actionMode: ActionMode? = null
+
+    // Notifications arrive in the middle of native work (often while painting), so reactions are deferred.
+    private var pendingUpdate = 0
+    private var updatePosted = false
+    private val lastImeState = IntArray(4) { -2 }
+    private val imeState = IntArray(4)
+    internal var imeBatchDepth = 0
+
+    private val timers = arrayOfNulls<Runnable>(8)
+    private var idleOn = false
+
+    init {
+        ensurePlatform(context)
+        ptr = ScintillaNative.create(this)
+        isFocusable = true
+        isFocusableInTouchMode = true
+        send(Sci.SCI_SETCARETWIDTH, (2 * density).roundToInt().coerceIn(1, 20).toLong())
+        send(Sci.SCI_SETSCROLLWIDTHTRACKING, 1)
+        send(Sci.SCI_SETSCROLLWIDTH, 1)
+        send(Sci.SCI_SETMULTIPLESELECTION, 1)
+        send(Sci.SCI_SETADDITIONALSELECTIONTYPING, 1)
+        send(Sci.SCI_SETMULTIPASTE, Sci.SC_MULTIPASTE_EACH.toLong())
+        send(Sci.SCI_SETEXTRAASCENT, density.roundToInt().toLong())
+        send(Sci.SCI_SETEXTRADESCENT, density.roundToInt().toLong())
+    }
+
+    // region Public API
+
+    fun send(msg: Int, wParam: Long = 0, lParam: Long = 0): Long =
+        if (ptr != 0L) ScintillaNative.send(ptr, msg, wParam, lParam) else 0
+
+    /** Sends a message whose lParam is a string. */
+    fun sendText(msg: Int, wParam: Long, text: String): Long =
+        if (ptr != 0L) ScintillaNative.sendString(ptr, msg, wParam, text.toByteArray(Charsets.UTF_8)) else 0
+
+    fun setProperty(key: String, value: String) {
+        if (ptr != 0L) {
+            ScintillaNative.sendStrings(ptr, Sci.SCI_SETPROPERTY, key.toByteArray(Charsets.UTF_8), value.toByteArray(Charsets.UTF_8))
+        }
+    }
+
+    /** Attaches a Lexilla lexer ("cpp", "python", "xml", ...) to the current document. */
+    fun setLexer(name: String): Boolean = ptr != 0L && ScintillaNative.setLexer(ptr, name)
+
+    var text: String
+        get() = if (ptr != 0L) String(ScintillaNative.getRange(ptr, 0, send(Sci.SCI_GETLENGTH)), Charsets.UTF_8) else ""
+        set(value) {
+            if (ptr == 0L) return
+            ScintillaNative.imeFinishComposing(ptr)
+            val bytes = value.toByteArray(Charsets.UTF_8)
+            send(Sci.SCI_CLEARALL)
+            ScintillaNative.sendString(ptr, Sci.SCI_ADDTEXT, bytes.size.toLong(), bytes)
+            send(Sci.SCI_GOTOPOS, 0)
+            send(Sci.SCI_EMPTYUNDOBUFFER)
+            fracY = 0
+            imm.restartInput(this)
+            invalidate()
+        }
+
+    /** Types text at every caret, as a hardware keyboard would. */
+    fun typeText(text: String) {
+        if (ptr != 0L) ScintillaNative.insertText(ptr, text)
+    }
+
+    /** Presses a Scintilla key (SCK_*) with SCMOD_* modifiers. */
+    fun pressKey(key: Int, modifiers: Int = 0): Boolean = ptr != 0L && ScintillaNative.keyDown(ptr, key, modifiers)
+
+    fun showKeyboard() {
+        requestFocus()
+        imm.showSoftInput(this, 0)
+    }
+
+    /** Frees the native editor. The view must not be used afterwards. */
+    fun destroy() {
+        handler.removeCallbacksAndMessages(null)
+        actionMode?.finish()
+        val p = ptr
+        ptr = 0
+        if (p != 0L) ScintillaNative.destroy(p)
+    }
+
+    // endregion
+
+    // region Drawing and layout
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (ptr == 0L) return
+        lineHeight = send(Sci.SCI_TEXTHEIGHT).toInt().coerceAtLeast(1)
+        ScintillaNative.resize(ptr, w, h + lineHeight)
+        if (h < oldh && hasFocus()) {
+            // Usually the keyboard opening: keep the caret in view.
+            handler.post {
+                if (ptr != 0L) {
+                    send(Sci.SCI_SCROLLCARET)
+                    revealCaret()
+                }
+            }
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (ptr == 0L) return
+        val textHeight = send(Sci.SCI_TEXTHEIGHT).toInt().coerceAtLeast(1)
+        if (textHeight != lineHeight) {
+            // Font or zoom changed.
+            lineHeight = textHeight
+            ScintillaNative.resize(ptr, width, height + lineHeight)
+            fracY = fracY.coerceIn(0, lineHeight)
+        }
+        canvas.save()
+        canvas.translate(0f, -fracY.toFloat())
+        surface.canvas = canvas
+        ScintillaNative.paint(ptr, surface)
+        surface.canvas = null
+        canvas.restore()
+        drawHandles(canvas)
+        drawScrollBar(canvas)
+    }
+
+    private fun totalDisplayLines(): Long = send(Sci.SCI_VISIBLEFROMDOCLINE, send(Sci.SCI_GETLINECOUNT)).coerceAtLeast(1)
+
+    private fun maxTopLine(): Long = (totalDisplayLines() - send(Sci.SCI_LINESONSCREEN)).coerceAtLeast(0)
+
+    private fun maxScrollY(): Long = (totalDisplayLines() * lineHeight - height).coerceAtLeast(0)
+
+    private fun scrollYPixels(): Long = send(Sci.SCI_GETFIRSTVISIBLELINE) * lineHeight + fracY
+
+    private fun scrollTextYTo(target: Long) {
+        val y = target.coerceIn(0, maxScrollY())
+        val top = min(y / lineHeight, maxTopLine())
+        fracY = (y - top * lineHeight).toInt()
+        if (top != send(Sci.SCI_GETFIRSTVISIBLELINE)) {
+            send(Sci.SCI_SETFIRSTVISIBLELINE, top)
+        }
+        lastScrollTime = android.os.SystemClock.uptimeMillis()
+        invalidate()
+    }
+
+    private fun marginsWidth(): Int {
+        var total = send(Sci.SCI_GETMARGINLEFT).toInt()
+        for (margin in 0 until send(Sci.SCI_GETMARGINS).toInt()) {
+            total += send(Sci.SCI_GETMARGINWIDTHN, margin.toLong()).toInt()
+        }
+        return total
+    }
+
+    private fun maxScrollX(): Int {
+        if (send(Sci.SCI_GETWRAPMODE).toInt() != Sci.SC_WRAP_NONE) return 0
+        val textArea = width - marginsWidth() - send(Sci.SCI_GETMARGINRIGHT).toInt()
+        return (send(Sci.SCI_GETSCROLLWIDTH).toInt() - textArea).coerceAtLeast(0)
+    }
+
+    private fun scrollTextXTo(target: Int) {
+        val x = target.coerceIn(0, maxScrollX())
+        if (x.toLong() != send(Sci.SCI_GETXOFFSET)) {
+            send(Sci.SCI_SETXOFFSET, x.toLong())
+            invalidate()
+        }
+    }
+
+    /** Scintilla keeps the caret inside its (taller) client area; this finishes the job for the visible part. */
+    private fun revealCaret() {
+        val top = send(Sci.SCI_GETFIRSTVISIBLELINE)
+        if (fracY >= lineHeight && top < maxTopLine()) {
+            fracY = 0
+            send(Sci.SCI_SETFIRSTVISIBLELINE, top + 1)
+        }
+        val caretY = send(Sci.SCI_POINTYFROMPOSITION, 0, send(Sci.SCI_GETCURRENTPOS)).toInt()
+        if (caretY < fracY) {
+            scrollTextYTo(scrollYPixels() - (fracY - caretY))
+        } else if (caretY + lineHeight > fracY + height) {
+            scrollTextYTo(scrollYPixels() + (caretY + lineHeight - fracY - height))
+        }
+    }
+
+    override fun computeScroll() {
+        if (ptr != 0L && scroller.computeScrollOffset()) {
+            scrollTextXTo(scroller.currX)
+            scrollTextYTo(scroller.currY.toLong())
+            actionMode?.invalidateContentRect()
+            postInvalidateOnAnimation()
+        }
+    }
+
+    private fun drawScrollBar(canvas: Canvas) {
+        if (android.os.SystemClock.uptimeMillis() - lastScrollTime > 1200) return
+        val maxY = maxScrollY()
+        if (maxY <= 0) return
+        val barWidth = 4f * density
+        val barHeight = max(32f * density, height.toFloat() * height / (maxY + height))
+        val top = (height - barHeight) * scrollYPixels() / maxY
+        canvas.drawRect(width - barWidth, top, width.toFloat(), top + barHeight, scrollBarPaint)
+        postInvalidateDelayed(1300)
+    }
+
+    // endregion
+
+    // region Selection handles
+
+    private fun selectionStart() = send(Sci.SCI_GETSELECTIONSTART)
+    private fun selectionEnd() = send(Sci.SCI_GETSELECTIONEND)
+    private fun hasSelection() = selectionStart() != selectionEnd()
+
+    /** View x of a document position. */
+    private fun xOf(position: Long) = send(Sci.SCI_POINTXFROMPOSITION, 0, position).toFloat()
+
+    /** View y of the bottom of the line holding a document position. */
+    private fun bottomOf(position: Long) = (send(Sci.SCI_POINTYFROMPOSITION, 0, position) - fracY + lineHeight).toFloat()
+
+    private fun positionAt(x: Float, y: Float): Long =
+        send(Sci.SCI_POSITIONFROMPOINT, x.roundToInt().toLong(), (y + fracY).roundToInt().toLong())
+
+    private fun caretHandleVisible() =
+        hasFocus() && !hasSelection() && android.os.SystemClock.uptimeMillis() < caretHandleUntil
+
+    /** kind: -1 selection start (drawn to the left), 0 caret (centred), 1 selection end (to the right). */
+    private fun handleCentreX(x: Float, kind: Int) = x + kind * handleRadius
+
+    private fun drawHandle(canvas: Canvas, x: Float, bottom: Float, kind: Int) {
+        if (bottom < 0 || bottom > height + handleRadius || x < marginsWidth() - 1) return
+        val cx = handleCentreX(x, kind)
+        val cy = bottom + handleRadius
+        handlePath.rewind()
+        handlePath.addCircle(cx, cy, handleRadius, Path.Direction.CW)
+        when (kind) {
+            -1 -> handlePath.addRect(cx, bottom, cx + handleRadius, cy, Path.Direction.CW)
+            1 -> handlePath.addRect(cx - handleRadius, bottom, cx, cy, Path.Direction.CW)
+            else -> {
+                // A small point so the handle visibly hangs from the caret.
+                handlePath.moveTo(cx, bottom - handleRadius * 0.4f)
+                handlePath.lineTo(cx + handleRadius * 0.7f, cy - handleRadius * 0.7f)
+                handlePath.lineTo(cx - handleRadius * 0.7f, cy - handleRadius * 0.7f)
+                handlePath.close()
+            }
+        }
+        canvas.drawPath(handlePath, handlePaint)
+    }
+
+    private fun drawHandles(canvas: Canvas) {
+        if (!hasFocus()) return
+        if (hasSelection()) {
+            val start = selectionStart()
+            val end = selectionEnd()
+            drawHandle(canvas, xOf(start), bottomOf(start), -1)
+            drawHandle(canvas, xOf(end), bottomOf(end), 1)
+        } else if (caretHandleVisible() || (touch == Touch.HANDLE)) {
+            val caret = send(Sci.SCI_GETCURRENTPOS)
+            drawHandle(canvas, xOf(caret), bottomOf(caret), 0)
+        }
+    }
+
+    private fun hitsHandle(x: Float, y: Float, position: Long, kind: Int): Boolean {
+        val cx = handleCentreX(xOf(position), kind)
+        val cy = bottomOf(position) + handleRadius
+        val reach = handleRadius * 2f
+        return abs(x - cx) <= reach && abs(y - cy) <= reach
+    }
+
+    /** Starts dragging a handle if the touch landed on one. */
+    private fun tryGrabHandle(x: Float, y: Float): Boolean {
+        val moving: Long
+        if (hasSelection()) {
+            val start = selectionStart()
+            val end = selectionEnd()
+            when {
+                hitsHandle(x, y, end, 1) -> { moving = end; dragFixed = start }
+                hitsHandle(x, y, start, -1) -> { moving = start; dragFixed = end }
+                else -> return false
+            }
+        } else if (caretHandleVisible() && hitsHandle(x, y, send(Sci.SCI_GETCURRENTPOS), 0)) {
+            moving = send(Sci.SCI_GETCURRENTPOS)
+            dragFixed = -1
+        } else {
+            return false
+        }
+        // Remember where the finger is relative to the middle of the handle's text line.
+        dragOffsetX = xOf(moving) - x
+        dragOffsetY = (bottomOf(moving) - lineHeight / 2f) - y
+        return true
+    }
+
+    private fun dragHandleTo(x: Float, y: Float) {
+        val position = positionAt(x + dragOffsetX, (y + dragOffsetY).coerceIn(1f, height - 1f))
+        if (dragFixed < 0) {
+            send(Sci.SCI_SETEMPTYSELECTION, position)
+            caretHandleUntil = android.os.SystemClock.uptimeMillis() + CARET_HANDLE_MS
+        } else {
+            send(Sci.SCI_SETANCHOR, dragFixed)
+            send(Sci.SCI_SETCURRENTPOS, position)
+        }
+        invalidate()
+    }
+
+    private fun dragSelectionTo(x: Float, y: Float) {
+        val position = positionAt(x, y.coerceIn(1f, height - 1f))
+        if (position < dragWordStart) {
+            send(Sci.SCI_SETANCHOR, dragWordEnd)
+            send(Sci.SCI_SETCURRENTPOS, position)
+        } else {
+            send(Sci.SCI_SETANCHOR, dragWordStart)
+            send(Sci.SCI_SETCURRENTPOS, max(position, dragWordEnd))
+        }
+        invalidate()
+    }
+
+    /** While a drag is held near the top or bottom edge, keep scrolling and extending the selection. */
+    private val edgeScroll = object : Runnable {
+        override fun run() {
+            if (ptr == 0L || (touch != Touch.HANDLE && touch != Touch.SELECT_DRAG)) return
+            val step = when {
+                lastY < edgeZone -> -((edgeZone - lastY) / 3f).roundToInt().coerceAtLeast(1)
+                lastY > height - edgeZone -> ((lastY - (height - edgeZone)) / 3f).roundToInt().coerceAtLeast(1)
+                else -> 0
+            }
+            if (step != 0) {
+                scrollTextYTo(scrollYPixels() + step)
+                if (touch == Touch.HANDLE) dragHandleTo(lastX, lastY) else dragSelectionTo(lastX, lastY)
+                handler.postDelayed(this, 16)
+            }
+        }
+    }
+
+    private fun updateEdgeScroll() {
+        handler.removeCallbacks(edgeScroll)
+        if (lastY < edgeZone || lastY > height - edgeZone) handler.postDelayed(edgeScroll, 16)
+    }
+
+    // endregion
+
+    // region Touch
+
+    private val longPress = Runnable {
+        if (ptr == 0L || touch != Touch.PENDING) return@Runnable
+        val position = positionAt(downX, downY)
+        val wordStart = send(Sci.SCI_WORDSTARTPOSITION, position, 1)
+        val wordEnd = send(Sci.SCI_WORDENDPOSITION, position, 1)
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        if (wordStart == wordEnd) {
+            // Nothing to select here: place the caret and offer paste.
+            send(Sci.SCI_SETEMPTYSELECTION, position)
+            touch = Touch.NONE
+            showActionMode()
+        } else {
+            send(Sci.SCI_SETSEL, wordStart, wordEnd)
+            dragWordStart = wordStart
+            dragWordEnd = wordEnd
+            touch = Touch.SELECT_DRAG
+        }
+        invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (ptr == 0L) return false
+        val x = event.x
+        val y = event.y
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                scroller.forceFinished(true)
+                velocityTracker?.recycle()
+                velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+                downX = x; downY = y; lastX = x; lastY = y
+                downTime = event.eventTime
+                if (tryGrabHandle(x, y)) {
+                    touch = Touch.HANDLE
+                    actionMode?.finish()
+                } else {
+                    touch = Touch.PENDING
+                    handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                }
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                velocityTracker?.addMovement(event)
+                when (touch) {
+                    Touch.PENDING -> if (abs(x - downX) > touchSlop || abs(y - downY) > touchSlop) {
+                        handler.removeCallbacks(longPress)
+                        touch = Touch.SCROLL
+                        // Lock to one axis; sideways scrolling only exists when lines are not wrapped.
+                        scrollHorizontal = abs(x - downX) > abs(y - downY) * 1.5f && maxScrollX() > 0
+                        actionMode?.finish()
+                    }
+
+                    Touch.SCROLL -> if (scrollHorizontal) {
+                        scrollTextXTo(send(Sci.SCI_GETXOFFSET).toInt() + (lastX - x).roundToInt())
+                    } else {
+                        scrollTextYTo(scrollYPixels() + (lastY - y).roundToInt())
+                    }
+
+                    Touch.HANDLE -> { dragHandleTo(x, y); lastX = x; lastY = y; updateEdgeScroll() }
+                    Touch.SELECT_DRAG -> { dragSelectionTo(x, y); lastX = x; lastY = y; updateEdgeScroll() }
+                    Touch.NONE -> {}
+                }
+                lastX = x; lastY = y
+            }
+
+            MotionEvent.ACTION_UP -> {
+                handler.removeCallbacks(longPress)
+                handler.removeCallbacks(edgeScroll)
+                when (touch) {
+                    Touch.PENDING -> tap(x, y, event.eventTime)
+                    Touch.SCROLL -> fling()
+                    Touch.HANDLE, Touch.SELECT_DRAG -> if (hasSelection()) showActionMode()
+                    Touch.NONE -> {}
+                }
+                touch = Touch.NONE
+                velocityTracker?.recycle()
+                velocityTracker = null
+                invalidate()
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                handler.removeCallbacks(longPress)
+                handler.removeCallbacks(edgeScroll)
+                touch = Touch.NONE
+                velocityTracker?.recycle()
+                velocityTracker = null
+            }
+        }
+        return true
+    }
+
+    private fun tap(x: Float, y: Float, upTime: Long) {
+        // Scintilla sees a mouse click, which also gives double tap = word and triple tap = line.
+        ScintillaNative.mouseDown(ptr, x, y + fracY, downTime, 0)
+        ScintillaNative.mouseUp(ptr, x, y + fracY, upTime, 0)
+        if (x < marginsWidth()) return  // Margin taps fold or select lines; they should not raise the keyboard.
+        if (hasSelection()) {
+            showActionMode()
+        } else {
+            actionMode?.finish()
+            caretHandleUntil = android.os.SystemClock.uptimeMillis() + CARET_HANDLE_MS
+            postInvalidateDelayed(CARET_HANDLE_MS + 50)
+        }
+        showKeyboard()
+    }
+
+    private fun fling() {
+        val tracker = velocityTracker ?: return
+        tracker.computeCurrentVelocity(1000, viewConfig.scaledMaximumFlingVelocity.toFloat())
+        val vx = if (scrollHorizontal) -tracker.xVelocity.toInt() else 0
+        val vy = if (scrollHorizontal) 0 else -tracker.yVelocity.toInt()
+        if (abs(vx) < viewConfig.scaledMinimumFlingVelocity && abs(vy) < viewConfig.scaledMinimumFlingVelocity) return
+        val maxY = maxScrollY().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        scroller.fling(
+            send(Sci.SCI_GETXOFFSET).toInt(), scrollYPixels().coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            vx, vy, 0, maxScrollX(), 0, maxY,
+        )
+        postInvalidateOnAnimation()
+    }
+
+    // endregion
+
+    // region Cut / copy / paste toolbar
+
+    private fun showActionMode() {
+        val current = actionMode
+        if (current != null) {
+            current.invalidate()
+            current.invalidateContentRect()
+        } else {
+            actionMode = startActionMode(actionCallback, ActionMode.TYPE_FLOATING)
+        }
+    }
+
+    private val actionCallback = object : ActionMode.Callback2() {
+        override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            populate(menu)
+            return true
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
+            populate(menu)
+            return true
+        }
+
+        private fun populate(menu: Menu) {
+            menu.clear()
+            if (hasSelection()) {
+                menu.add(Menu.NONE, android.R.id.cut, 0, android.R.string.cut)
+                menu.add(Menu.NONE, android.R.id.copy, 1, android.R.string.copy)
+            }
+            if (clipboard.hasPrimaryClip()) {
+                menu.add(Menu.NONE, android.R.id.paste, 2, android.R.string.paste)
+            }
+            menu.add(Menu.NONE, android.R.id.selectAll, 3, android.R.string.selectAll)
+        }
+
+        override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+            if (ptr == 0L) return false
+            when (item.itemId) {
+                android.R.id.cut -> send(Sci.SCI_CUT)
+                android.R.id.copy -> { send(Sci.SCI_COPY); send(Sci.SCI_SETEMPTYSELECTION, send(Sci.SCI_GETCURRENTPOS)) }
+                android.R.id.paste -> send(Sci.SCI_PASTE)
+                android.R.id.selectAll -> { send(Sci.SCI_SELECTALL); mode.invalidate(); invalidate(); return true }
+                else -> return false
+            }
+            mode.finish()
+            invalidate()
+            return true
+        }
+
+        override fun onDestroyActionMode(mode: ActionMode) {
+            actionMode = null
+        }
+
+        override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
+            val start = selectionStart()
+            val end = selectionEnd()
+            val top = (bottomOf(start) - lineHeight).toInt().coerceIn(0, height)
+            val bottom = (bottomOf(end) + if (hasSelection()) handleRadius * 2 else 0f).toInt().coerceIn(top, height)
+            val left = min(xOf(start), xOf(end)).toInt().coerceIn(0, width)
+            val right = max(xOf(start), xOf(end)).toInt().coerceIn(left, width)
+            if (bottomOf(start) == bottomOf(end)) outRect.set(left, top, right, bottom) else outRect.set(0, top, width, bottom)
+        }
+    }
+
+    // endregion
+
+    // region Keys
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean = handleKey(event) || super.onKeyDown(keyCode, event)
+
+    /** Handles a key press from a hardware keyboard or one the soft keyboard sent as a key event. */
+    internal fun handleKey(event: KeyEvent): Boolean {
+        if (ptr == 0L || event.action != KeyEvent.ACTION_DOWN) return false
+        val modifiers = (if (event.isShiftPressed) Sci.SCMOD_SHIFT else 0) or
+            (if (event.isCtrlPressed) Sci.SCMOD_CTRL else 0) or
+            (if (event.isAltPressed) Sci.SCMOD_ALT else 0)
+        val key = when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> Sci.SCK_LEFT
+            KeyEvent.KEYCODE_DPAD_RIGHT -> Sci.SCK_RIGHT
+            KeyEvent.KEYCODE_DPAD_UP -> Sci.SCK_UP
+            KeyEvent.KEYCODE_DPAD_DOWN -> Sci.SCK_DOWN
+            KeyEvent.KEYCODE_MOVE_HOME -> Sci.SCK_HOME
+            KeyEvent.KEYCODE_MOVE_END -> Sci.SCK_END
+            KeyEvent.KEYCODE_PAGE_UP -> Sci.SCK_PRIOR
+            KeyEvent.KEYCODE_PAGE_DOWN -> Sci.SCK_NEXT
+            KeyEvent.KEYCODE_DEL -> Sci.SCK_BACK
+            KeyEvent.KEYCODE_FORWARD_DEL -> Sci.SCK_DELETE
+            KeyEvent.KEYCODE_INSERT -> Sci.SCK_INSERT
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> Sci.SCK_RETURN
+            KeyEvent.KEYCODE_TAB -> Sci.SCK_TAB
+            KeyEvent.KEYCODE_ESCAPE -> Sci.SCK_ESCAPE
+            else -> 0
+        }
+        if (key != 0) {
+            ScintillaNative.keyDown(ptr, key, modifiers)
+            return true
+        }
+        if (event.isCtrlPressed && !event.isAltPressed && event.keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
+            // Scintilla's own key map provides Ctrl+Z, Y, X, C, V, A, D, L, T, U and friends.
+            return ScintillaNative.keyDown(ptr, 'A'.code + (event.keyCode - KeyEvent.KEYCODE_A), modifiers)
+        }
+        val ch = event.unicodeChar
+        if (ch != 0 && (ch and KeyCharacterMap.COMBINING_ACCENT) == 0 && !Character.isISOControl(ch)) {
+            ScintillaNative.insertText(ptr, String(Character.toChars(ch)))
+            return true
+        }
+        return false
+    }
+
+    // endregion
+
+    // region Soft keyboard
+
+    override fun onCheckIsTextEditor(): Boolean = true
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+        if (ptr == 0L) return null
+        ScintillaNative.imeFinishComposing(ptr)
+        outAttrs.inputType = when (keyboardMode) {
+            KeyboardMode.CODE -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            KeyboardMode.TEXT -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN or
+            EditorInfo.IME_FLAG_NO_ENTER_ACTION or EditorInfo.IME_ACTION_NONE
+        ScintillaNative.imeState(ptr, imeState)
+        outAttrs.initialSelStart = imeState[0]
+        outAttrs.initialSelEnd = imeState[1]
+        imeState.copyInto(lastImeState)
+        imeBatchDepth = 0
+        return SciInputConnection(this)
+    }
+
+    internal fun nativePtr(): Long = ptr
+
+    /** Tells the soft keyboard where the selection and composing text are, if that changed. */
+    internal fun syncIme() {
+        if (ptr == 0L || imeBatchDepth > 0) return
+        ScintillaNative.imeState(ptr, imeState)
+        if (!imeState.contentEquals(lastImeState)) {
+            imeState.copyInto(lastImeState)
+            imm.updateSelection(this, imeState[0], imeState[1], imeState[2], imeState[3])
+        }
+    }
+
+    // endregion
+
+    // region SciHost: calls from the native editor
+
+    // SciHost.invalidate() is View.invalidate().
+
+    override fun notify(
+        code: Int, position: Long, ch: Int, modifiers: Int, modificationType: Int,
+        length: Long, linesAdded: Long, line: Long, margin: Int, updated: Int,
+    ) {
+        if (code == Sci.SCN_UPDATEUI) {
+            pendingUpdate = pendingUpdate or updated
+            if (!updatePosted) {
+                updatePosted = true
+                handler.post(updateRunnable)
+            }
+        }
+    }
+
+    private val updateRunnable = Runnable {
+        updatePosted = false
+        val what = pendingUpdate
+        pendingUpdate = 0
+        if (ptr == 0L) return@Runnable
+        if (what and (Sci.SC_UPDATE_SELECTION or Sci.SC_UPDATE_CONTENT) != 0) {
+            if (touch != Touch.SCROLL && touch != Touch.HANDLE && touch != Touch.SELECT_DRAG && scroller.isFinished) {
+                revealCaret()
+            }
+            syncIme()
+            if (!hasSelection() && touch == Touch.NONE && actionMode != null && what and Sci.SC_UPDATE_CONTENT != 0) {
+                actionMode?.finish()
+            }
+        }
+        onStateChanged?.invoke()
+        invalidate()
+    }
+
+    override fun startTimer(reason: Int, millis: Int) {
+        if (reason !in timers.indices) return
+        cancelTimer(reason)
+        val period = millis.coerceAtLeast(1).toLong()
+        val timer = object : Runnable {
+            override fun run() {
+                if (ptr == 0L || timers[reason] !== this) return
+                ScintillaNative.tick(ptr, reason)
+                // The tick may have cancelled or replaced this timer.
+                if (ptr != 0L && timers[reason] === this) handler.postDelayed(this, period)
+            }
+        }
+        timers[reason] = timer
+        handler.postDelayed(timer, period)
+    }
+
+    override fun cancelTimer(reason: Int) {
+        if (reason !in timers.indices) return
+        timers[reason]?.let { handler.removeCallbacks(it) }
+        timers[reason] = null
+    }
+
+    private val idleRunnable = object : Runnable {
+        override fun run() {
+            if (ptr == 0L || !idleOn) return
+            if (ScintillaNative.idle(ptr) && idleOn) handler.post(this)
+        }
+    }
+
+    override fun setIdle(on: Boolean) {
+        idleOn = on
+        handler.removeCallbacks(idleRunnable)
+        if (on) handler.post(idleRunnable)
+    }
+
+    override fun queueWork() {
+        handler.post { if (ptr != 0L) ScintillaNative.idleWork(ptr) }
+    }
+
+    override fun setClipboard(text: String) {
+        clipboard.setPrimaryClip(ClipData.newPlainText("Pocketpad++", text))
+    }
+
+    override fun getClipboard(): String {
+        val clip = clipboard.primaryClip ?: return ""
+        if (clip.itemCount == 0) return ""
+        return clip.getItemAt(0).coerceToText(context)?.toString() ?: ""
+    }
+
+    // endregion
+
+    override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: Rect?) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+        if (ptr == 0L) return
+        ScintillaNative.setFocus(ptr, gainFocus && hasWindowFocus())
+        if (!gainFocus) actionMode?.finish()
+        invalidate()
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (ptr != 0L) ScintillaNative.setFocus(ptr, hasWindowFocus && hasFocus())
+    }
+
+    companion object {
+        private const val CARET_HANDLE_MS = 4000L
+        private var platformReady = false
+
+        private fun ensurePlatform(context: Context) {
+            if (platformReady) return
+            val metrics = context.resources.displayMetrics
+            // Style sizes are treated as sp, so they follow the system font size setting.
+            val pixelsPerPoint = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 1f, metrics)
+            val doubleTapSlop = ViewConfiguration.get(context).scaledTouchSlop * 3f
+            ScintillaNative.init(AndroidPlatform, pixelsPerPoint, doubleTapSlop)
+            platformReady = true
+        }
+    }
+}

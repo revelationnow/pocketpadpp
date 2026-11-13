@@ -171,6 +171,10 @@ public final class Harness implements SciHost {
         HostSurface surface = paint(1080, 1400);
         System.out.println("render: " + HostSurface.calls + " drawing calls, " + HostSurface.textCalls + " text runs");
         ok(HostSurface.textCalls > 20, "paint drew text runs");
+        int settled = invalidates;
+        paint(1080, 1400);
+        paint(1080, 1400);
+        eq(settled, invalidates, "painting an unchanged editor does not ask for another repaint");
         ImageIO.write(surface.image, "png", new File(outDir, "render.png"));
         int lineHeight = (int) send(Sci.SCI_TEXTHEIGHT, 0, 0);
         ok(lineHeight > 20 && lineHeight < 60, "line height is plausible for a 26px font: " + lineHeight);

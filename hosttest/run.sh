@@ -14,5 +14,6 @@ javac -Xlint:all -d "$build/classes" \
     "$root"/app/src/main/java/io/github/revelationnow/pocketpadpp/scintilla/*.java \
     "$here"/java/host/*.java
 
-java -Djava.awt.headless=true -Djava.library.path="$build" -Xcheck:jni \
+# CHECK_JNI=1 adds the JVM's JNI checker (slow, and noisy about the JDK's own font code).
+java -Djava.awt.headless=true -Djava.library.path="$build" ${CHECK_JNI:+-Xcheck:jni} \
     -cp "$build/classes" host.Harness "$here/out"
