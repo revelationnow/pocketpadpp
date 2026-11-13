@@ -460,6 +460,67 @@ object EditOps {
         return slots.size
     }
 
+    /**
+     * Search > Find characters in range: selects the next character whose bytes fall in [low]..[high]
+     * (0 to 255, as Notepad++ counts them), searching from the selection. Returns false when there is none.
+     */
+    fun findCharInRange(sci: SciApi, low: Int, high: Int, forward: Boolean, wrap: Boolean): Boolean {
+        val length = sci.send(Sci.SCI_GETLENGTH)
+        fun scan(from: Long, to: Long): Long {
+            // In chunks, so that a large document is not copied whole or asked for byte by byte.
+            val chunk = 1L shl 16
+            var start = from
+            while (start < to) {
+                val end = minOf(start + chunk, to)
+                val bytes = sci.range(start, end)
+                for (i in bytes.indices) {
+                    if ((bytes[i].toInt() and 0xFF) in low..high) return start + i
+                }
+                start = end
+            }
+            return -1
+        }
+        val selStart = sci.send(Sci.SCI_GETSELECTIONSTART)
+        val selEnd = sci.send(Sci.SCI_GETSELECTIONEND)
+        var found = if (forward) scan(selEnd, length) else scanBackward(sci, low, high, 0, selStart)
+        if (found < 0 && wrap) found = if (forward) scan(0, selEnd) else scanBackward(sci, low, high, selStart, length)
+        if (found < 0) return false
+        // Whole characters: a byte in the middle of a UTF-8 sequence selects the character it belongs to.
+        val start = sci.send(Sci.SCI_POSITIONBEFORE, sci.send(Sci.SCI_POSITIONAFTER, found))
+        sci.send(Sci.SCI_ENSUREVISIBLE, sci.send(Sci.SCI_LINEFROMPOSITION, start))
+        sci.send(Sci.SCI_SETSEL, start, sci.send(Sci.SCI_POSITIONAFTER, start))
+        return true
+    }
+
+    private fun scanBackward(sci: SciApi, low: Int, high: Int, from: Long, to: Long): Long {
+        val chunk = 1L shl 16
+        var end = to
+        while (end > from) {
+            val start = maxOf(from, end - chunk)
+            val bytes = sci.range(start, end)
+            for (i in bytes.indices.reversed()) {
+                if ((bytes[i].toInt() and 0xFF) in low..high) return start + i
+            }
+            end = start
+        }
+        return -1
+    }
+
+    /** On Selection > Redact Selection: every selected character except line ends becomes a block. */
+    fun redactSelection(sci: SciApi): Boolean =
+        transformSelection(sci) { text -> text.map { if (it == '\n' || it == '\r') it else '\u2588' }.joinToString("") }
+
+    /** View > Hide Lines: hides the lines the selection touches, except the first and last line of the document. */
+    fun hideLines(sci: SciApi): Boolean {
+        val last = sci.send(Sci.SCI_GETLINECOUNT) - 1
+        val from = sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETSELECTIONSTART)).coerceAtLeast(1)
+        val to = sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETSELECTIONEND)).coerceAtMost(last - 1)
+        if (to < from) return false
+        sci.send(Sci.SCI_HIDELINES, from, to)
+        sci.send(Sci.SCI_GOTOLINE, from - 1)
+        return true
+    }
+
     /** Character, word and line counts for View > Summary. */
     fun summary(sci: SciApi): Triple<Long, Long, Long> {
         val length = sci.send(Sci.SCI_GETLENGTH)

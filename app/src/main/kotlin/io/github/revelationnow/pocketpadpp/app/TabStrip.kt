@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
 /** The row of document tabs. */
 class TabStrip(context: Context, private val palette: Palette) : HorizontalScrollView(context) {
 
-    class Tab(val title: String, val dirty: Boolean, val active: Boolean)
+    class Tab(val title: String, val dirty: Boolean, val active: Boolean, val colour: Int = 0)
 
     var onSelect: ((Int) -> Unit)? = null
     var onClose: ((Int) -> Unit)? = null
@@ -39,6 +39,7 @@ class TabStrip(context: Context, private val palette: Palette) : HorizontalScrol
         var activeView: View? = null
         tabs.forEachIndexed { index, tab ->
             val item = TabView(context, tab.active, palette).apply {
+                palette.tabColours.getOrNull(tab.colour - 1)?.let { setBackgroundColor(it) }
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(12f), 0, dp(2f), 0)

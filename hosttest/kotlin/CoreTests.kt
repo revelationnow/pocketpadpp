@@ -3,6 +3,7 @@ package host
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
+import io.github.revelationnow.pocketpadpp.core.Hashes
 import io.github.revelationnow.pocketpadpp.core.LanguageSetup
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
@@ -553,6 +554,35 @@ private fun testMoreEditOps() {
     eq(2, Marks.removeLines(sci, bookmarkedOnes = false), "remove non-bookmarked lines")
     eq("b\n", sci.text, "only the bookmarked line is left")
     sci.send(Sci.SCI_MARKERDELETEALL, marker)
+
+    // Tools: digests
+    eq("900150983cd24fb0d6963f7d28e17f72", Hashes.of("MD5", "abc".toByteArray()), "MD5")
+    eq("a9993e364706816aba3e25717850c26c9cd0d89d", Hashes.of("SHA-1", "abc".toByteArray()), "SHA-1")
+    eq("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Hashes.of("SHA-256", "abc".toByteArray()), "SHA-256")
+    eq(128, Hashes.of("SHA-512", "abc".toByteArray()).length, "SHA-512 length")
+    eq(Hashes.of("MD5", "a".toByteArray()) + "\n" + Hashes.of("MD5", "b".toByteArray()), Hashes.ofText("MD5", "a\n\nb\n", eachLine = true), "one digest per non-empty line")
+    eq("", Hashes.ofText("MD5", "", eachLine = false), "nothing to hash")
+
+    // Find characters in range, redact, hide lines
+    sci.text = "plain caf\u00e9 and na\u00efve\n"
+    sci.send(Sci.SCI_GOTOPOS, 0)
+    ok(EditOps.findCharInRange(sci, 128, 255, forward = true, wrap = false), "find a non-ASCII character")
+    eq("\u00e9", String(sci.range(sci.send(Sci.SCI_GETSELECTIONSTART), sci.send(Sci.SCI_GETSELECTIONEND)), Charsets.UTF_8), "the whole character is selected")
+    ok(EditOps.findCharInRange(sci, 128, 255, forward = true, wrap = false), "and the next one")
+    eq("\u00ef", String(sci.range(sci.send(Sci.SCI_GETSELECTIONSTART), sci.send(Sci.SCI_GETSELECTIONEND)), Charsets.UTF_8), "second non-ASCII character")
+    ok(!EditOps.findCharInRange(sci, 128, 255, forward = true, wrap = false), "no more without wrapping")
+    ok(EditOps.findCharInRange(sci, 128, 255, forward = true, wrap = true), "wrapping starts again from the top")
+    ok(EditOps.findCharInRange(sci, 128, 255, forward = false, wrap = true), "searching upwards wraps to the last one")
+    eq("\u00ef", String(sci.range(sci.send(Sci.SCI_GETSELECTIONSTART), sci.send(Sci.SCI_GETSELECTIONEND)), Charsets.UTF_8), "upwards from the first finds the last")
+    sci.text = "secret word\nnext\n"
+    sci.send(Sci.SCI_SETSEL, 0, 14)
+    ok(EditOps.redactSelection(sci), "redact")
+    eq("\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n\u2588\u2588xt\n", sci.text, "selected characters are blocked out, line ends kept")
+    sci.text = "a\nb\nc\nd\n"
+    sci.send(Sci.SCI_SETSEL, 2, 5)
+    ok(EditOps.hideLines(sci), "hide lines")
+    eq(listOf(1L, 0L, 0L, 1L), (0L..3L).map { sci.send(Sci.SCI_GETLINEVISIBLE, it) }, "the selected lines are hidden")
+    sci.send(Sci.SCI_SHOWLINES, 0, 4)
 
     // Column Editor
     eq(listOf("1", "1", "3", "3", "5"), TextTransforms.columnNumbers(5, 1, 2, 2, 10, TextTransforms.Leading.NONE), "numbers with increase and repeat")

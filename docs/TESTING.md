@@ -29,6 +29,8 @@ and saves a screenshot at every step. It covers:
   shortcuts while a suggestion keyboard is composing a word or typing over a selection, and a shortcut
   from a hardware keyboard
 - column selection by dragging with Alt held and with Alt+Shift+arrows, and the Column Editor with text and numbers
+- the Tools digests, Window sorting and the document list, tab colours, read-only for all documents, redact,
+  find characters in range, hide lines, distraction free mode, and the ? menu
 - highlighting for C++, Python, HTML and JSON
 
 To run it yourself, start an emulator or plug in a phone with USB debugging and run `tools/run_ui_tests.sh`.

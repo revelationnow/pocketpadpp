@@ -44,6 +44,19 @@ class Doc(val id: Long, internal val sciDoc: Long, var language: Language) {
     internal var anchor = 0L
     internal var firstDocLine = 0L
     internal var folds: List<Long> = emptyList()
+
+    /** 0 for none, or 1 to 5: the colour given to the tab with View > Tab > Apply Colour. */
+    var colour = 0
+
+    /** Size as UTF-8 and the file's modification time when it was opened or saved, for Window > Sort By. */
+    var length = 0L
+    var modified = 0L
+
+    /** Counts up each time the tab is shown, for most-recently-used order. */
+    internal var lastShown = 0L
+
+    /** A read-only state set while the tab was in the background, applied when it is next shown. */
+    internal var pendingReadOnly: Boolean? = null
     internal var xOffset = 0L
     internal var eolMode = Eol.LF.sciMode
 
@@ -57,6 +70,19 @@ class LoadedFile(val name: String, val utf8: ByteArray, val encoding: TextEncodi
 object FileIo {
     /** Refuse files that would not fit comfortably in memory several times over. */
     const val MAX_FILE_BYTES = 64L * 1024 * 1024
+
+    /** When the file was last changed, in milliseconds, or 0 when its provider does not say. */
+    fun lastModified(context: Context, uri: Uri): Long {
+        try {
+            if (uri.scheme == "file") return java.io.File(uri.path ?: return 0).lastModified()
+            context.contentResolver.query(uri, arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0)
+            }
+        } catch (e: Exception) {
+            // Not every provider has the column.
+        }
+        return 0
+    }
 
     fun displayName(context: Context, uri: Uri): String {
         try {
@@ -208,6 +234,7 @@ class Workspace(
         doc.xOffset = editor.send(Sci.SCI_GETXOFFSET)
         // Which blocks are folded belongs to the view, not the document, so it is carried per tab by hand.
         doc.folds = foldsBeforeCreate ?: EditOps.foldedLines(editor)
+        doc.length = editor.send(Sci.SCI_GETLENGTH)
         foldsBeforeCreate = null
         doc.eolMode = editor.send(Sci.SCI_GETEOLMODE).toInt()
         doc.dirty = isDirty(doc)
@@ -230,11 +257,30 @@ class Workspace(
                 editor.send(Sci.SCI_SETSAVEPOINT)
                 doc.savePointPending = false
             }
+            doc.pendingReadOnly?.let { editor.send(Sci.SCI_SETREADONLY, if (it) 1 else 0) }
+            doc.pendingReadOnly = null
+            doc.lastShown = ++shownCounter
             applyLanguage(doc)
             EditOps.restoreFolds(editor, doc.folds)
             restoreViewState(doc)
             editor.documentSwitched()
         }
+        onTabsChanged?.invoke()
+    }
+
+    private var shownCounter = 0L
+
+    /** Window > Sort By: puts the tabs in a new order. The tab on screen stays the same. */
+    fun sortTabs(order: Comparator<Doc>) {
+        active.length = editor.send(Sci.SCI_GETLENGTH)
+        docs.sortWith(order)
+        onTabsChanged?.invoke()
+    }
+
+    /** Edit > Set / Clear Read-Only for All Documents. */
+    fun setReadOnlyAll(readOnly: Boolean) {
+        for (doc in docs) doc.pendingReadOnly = if (doc === active) null else readOnly
+        editor.send(Sci.SCI_SETREADONLY, if (readOnly) 1 else 0)
         onTabsChanged?.invoke()
     }
 
@@ -330,6 +376,8 @@ class Workspace(
         doc.uri = uri
         doc.name = file.name
         doc.untitledNumber = 0
+        doc.length = file.utf8.size.toLong()
+        doc.modified = if (uri != null) FileIo.lastModified(context, uri) else 0
         doc.encoding = file.encoding
         doc.forcedDirty = false
         doc.language = language ?: languages.forFileName(file.name)
@@ -360,6 +408,7 @@ class Workspace(
     /** Records that the active tab now matches what is on disk. */
     fun markSaved(doc: Doc, uri: Uri, name: String) {
         val renamed = doc.uri != uri || doc.name != name
+        doc.modified = System.currentTimeMillis()
         doc.uri = uri
         doc.name = name
         doc.untitledNumber = 0
@@ -430,6 +479,7 @@ class Workspace(
                 anchor = doc.anchor,
                 firstVisibleLine = doc.firstDocLine,
                 xOffset = doc.xOffset.toInt(),
+                tabColour = doc.colour,
                 backup = doc.backupName,
                 untitledNumber = doc.untitledNumber,
             )
@@ -473,6 +523,7 @@ class Workspace(
         doc.caret = entry.caret.coerceIn(0, length)
         doc.firstDocLine = entry.firstVisibleLine
         doc.xOffset = entry.xOffset.toLong()
+        doc.colour = entry.tabColour
         restoreViewState(doc)
         onTabsChanged?.invoke()
         return doc

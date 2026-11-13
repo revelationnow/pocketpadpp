@@ -21,6 +21,8 @@ data class SessionEntry(
     /** File holding unsaved content, relative to the backup directory, or null if the tab had no changes. */
     val backup: String? = null,
     val untitledNumber: Int = 0,
+    /** 0 for none, or 1 to 5 for one of the tab colours. */
+    val tabColour: Int = 0,
 )
 
 data class Session(val activeIndex: Int, val entries: List<SessionEntry>)
@@ -62,6 +64,7 @@ object SessionStore {
             attribute("endPos", e.caret)
             attribute("firstVisibleLine", e.firstVisibleLine)
             attribute("xOffset", e.xOffset)
+            attribute("tabColourId", e.tabColour)
             attribute("backupFilePath", e.backup)
             attribute("untitled", e.untitledNumber)
             append(" />\n")
@@ -88,6 +91,7 @@ object SessionStore {
                             anchor = a.getValue("startPos")?.toLongOrNull() ?: 0,
                             firstVisibleLine = a.getValue("firstVisibleLine")?.toLongOrNull() ?: 0,
                             xOffset = a.getValue("xOffset")?.toIntOrNull() ?: 0,
+                            tabColour = a.getValue("tabColourId")?.toIntOrNull()?.coerceIn(0, 5) ?: 0,
                             backup = a.getValue("backupFilePath"),
                             untitledNumber = a.getValue("untitled")?.toIntOrNull() ?: 0,
                         )

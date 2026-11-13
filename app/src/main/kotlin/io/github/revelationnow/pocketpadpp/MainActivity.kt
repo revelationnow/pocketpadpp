@@ -40,6 +40,7 @@ import io.github.revelationnow.pocketpadpp.app.Workspace
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
+import io.github.revelationnow.pocketpadpp.core.Hashes
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
@@ -77,6 +78,7 @@ class MainActivity : Activity() {
 
     private lateinit var palette: Palette
     private lateinit var themed: Context
+    private val chromeBars = ArrayList<View>()
 
     // The on-screen Ctrl, Alt and Shift keys: SCMOD_* bits held for the next key only, and those locked on.
     private var armedModifiers = 0
@@ -177,9 +179,20 @@ class MainActivity : Activity() {
         tool("Find", "Find") { findBar.open(withReplace = false) }
         moreButton = tool("⋮", "Menu") { showMainMenu() }
         root.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)))
+        chromeBars.clear()
+        chromeBars += toolbar
 
         tabs = TabStrip(themed, palette)
-        root.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38f)))
+        // The tabs, and at their end Notepad++'s button that lists every open document.
+        val tabRow = LinearLayout(themed).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(palette.tabBar)
+            addView(tabs, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            addView(barButton("\u25BC", "Tab list") { showWindowsList() }.apply { setTextColor(palette.tabInactiveText) },
+                LinearLayout.LayoutParams(dp(40f), ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        root.addView(tabRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38f)))
+        chromeBars += tabRow
 
         root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -199,7 +212,10 @@ class MainActivity : Activity() {
         root.addView(findBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         root.addView(extraKeys(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42f)))
-        root.addView(statusBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val status = statusBar()
+        root.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        chromeBars += status
+        for (bar in chromeBars) bar.visibility = if (distractionFree) View.GONE else View.VISIBLE
         setContentView(root)
         tabs.onSelect = { index -> workspace.docs.getOrNull(index)?.let { workspace.activate(it) } }
         tabs.onClose = { index -> workspace.docs.getOrNull(index)?.let { requestClose(it) } }
@@ -207,9 +223,7 @@ class MainActivity : Activity() {
 
         window.statusBarColor = palette.chrome
         window.navigationBarColor = palette.chrome
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = if (palette.dark) 0 else
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or (if (Build.VERSION.SDK_INT >= 27) View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0)
+        applySystemBars()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -241,7 +255,11 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (findBar.isOpen) findBar.close() else super.onBackPressed()
+        when {
+            findBar.isOpen -> findBar.close()
+            fullScreen -> setScreenMode(full = false, bare = false)
+            else -> super.onBackPressed()
+        }
     }
 
     private fun barButton(label: String, description: String, onClick: (View) -> Unit): Button =
@@ -415,6 +433,8 @@ class MainActivity : Activity() {
                 'N'.code -> showMainMenu("Encoding")
                 'L'.code -> showMainMenu("Language")
                 'T'.code -> showMainMenu("Settings")
+                'O'.code -> showMainMenu("Tools")
+                'W'.code -> showMainMenu("Window")
                 'C'.code -> columnEditor()
                 '0'.code -> editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_CONTRACT.toLong())
                 in '1'.code..'8'.code -> EditOps.foldLevel(editor, key - '0'.code, collapse = true)
@@ -466,7 +486,7 @@ class MainActivity : Activity() {
 
     private fun refreshTabs() {
         shownDirty = workspace.isDirty(workspace.active)
-        tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, workspace.isDirty(it), it === workspace.active) })
+        tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, workspace.isDirty(it), it === workspace.active, it.colour) })
         updateStatus()
     }
 
@@ -650,6 +670,14 @@ class MainActivity : Activity() {
             return
         }
         when (requestCode) {
+            REQUEST_HASH -> {
+                val uris = ArrayList<Uri>()
+                data.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { uris += it } }
+                if (uris.isEmpty()) data.data?.let { uris += it }
+                hashRequest?.let { (name, algorithm) -> if (uris.isNotEmpty()) showFileHashes(name, algorithm, uris) }
+                hashRequest = null
+            }
+
             REQUEST_OPEN -> {
                 val uris = ArrayList<Uri>()
                 data.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { uris += it } }
@@ -749,6 +777,9 @@ class MainActivity : Activity() {
             sub("Encoding") { encodingMenu() }
             sub("Language") { languageMenu() }
             sub("Settings") { settingsMenu() }
+            sub("Tools") { toolsMenu() }
+            sub("Window") { windowMenu() }
+            sub("?") { helpMenu() }
         }
         if (open != null) menuSheet?.open(open)
     }
@@ -764,6 +795,7 @@ class MainActivity : Activity() {
         item("Save All") { saveAll() }
         item("Close") { requestClose(workspace.active) }
         item("Close All") { closeMany(workspace.docs.toList()) }
+        item("Open in Default Viewer", enabled = doc.uri != null) { viewInAnotherApp(doc, null) }
         sub("Close Multiple Documents") {
             val index = workspace.docs.indexOf(doc)
             item("Close All but Active Document") { closeMany(workspace.docs.filter { it !== doc }) }
@@ -779,6 +811,11 @@ class MainActivity : Activity() {
             item("Restore Recent Closed File", enabled = recent.isNotEmpty()) { openUris(listOf(recent.first().first)) }
             item("Open All Recent Files", enabled = recent.isNotEmpty()) { openUris(recent.map { it.first }) }
             item("Empty Recent Files List", enabled = recent.isNotEmpty()) { prefs.edit().remove("recent").apply() }
+        }
+        item("Exit") {
+            // Like Notepad++ with its session snapshot: nothing is asked, everything comes back next time.
+            workspace.saveSession()
+            finishAndRemoveTask()
         }
     }
 
@@ -799,11 +836,16 @@ class MainActivity : Activity() {
         sub("Insert") {
             item("Date Time (short)") { insertDateTime(java.text.DateFormat.SHORT) }
             item("Date Time (long)") { insertDateTime(java.text.DateFormat.LONG) }
+            item("Date Time (customized)") {
+                val format = prefs.getString("dateTimeFormat", null) ?: "yyyy-MM-dd HH:mm:ss"
+                editor.typeText(java.text.SimpleDateFormat(format, java.util.Locale.getDefault()).format(java.util.Date()))
+            }
         }
         sub("Copy to Clipboard") {
             val uri = workspace.active.uri
             item("Copy Current Full File path", enabled = uri != null) { editor.setClipboard(uri.toString()) }
             item("Copy Current Filename") { editor.setClipboard(workspace.active.name) }
+            item("Copy Current Dir. Path", enabled = uri != null) { editor.setClipboard(uri.toString().substringBeforeLast('/')) }
             item("Copy All Filenames") { editor.setClipboard(workspace.docs.joinToString("\n") { it.name }) }
             item("Copy All File Paths") { editor.setClipboard(workspace.docs.mapNotNull { it.uri?.toString() }.joinToString("\n")) }
         }
@@ -881,8 +923,17 @@ class MainActivity : Activity() {
             item("Space to TAB (All)") { EditOps.spacesToTabs(editor, leadingOnly = false) }
             item("Space to TAB (Leading)") { EditOps.spacesToTabs(editor, leadingOnly = true) }
         }
+        sub("Paste Special") {
+            item("Paste HTML Content") {
+                val html = (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.htmlText
+                if (html.isNullOrEmpty()) toast("The clipboard holds no HTML") else editor.typeText(html)
+            }
+        }
         sub("On Selection") {
+            item("Open File") { openSelectedFile() }
             item("Search on Internet") { searchOnInternet() }
+            item("Redact Selection") { if (!EditOps.redactSelection(editor)) toast("Select some text first") }
         }
         item("Column Mode...") { columnModeTip() }
         item("Column Editor...") { columnEditor() }
@@ -901,6 +952,8 @@ class MainActivity : Activity() {
         item("Undo the Latest Added Multi-Select") { EditOps.multiSelectUndo(editor) }
         item("Skip Current & Go to Next Multi-select") { EditOps.multiSelectSkip(editor, lastMultiSelect.first, lastMultiSelect.second) }
         item("Read-Only", checked = readOnly) { editor.send(Sci.SCI_SETREADONLY, if (readOnly) 0 else 1) }
+        item("Set Read-Only for All Documents") { workspace.setReadOnlyAll(true) }
+        item("Clear Read-Only for All Documents") { workspace.setReadOnlyAll(false) }
     }
 
     private fun MenuSpec.eolItems() {
@@ -926,6 +979,7 @@ class MainActivity : Activity() {
         item("Mark...") { findBar.openMark() }
         item("Go to...") { goToLine() }
         item("Go to Matching Brace") { EditOps.goToMatchingBrace(editor) }
+        item("Find characters in range...") { findCharsInRange() }
         item("Select All In-between {} [] or ()") {
             if (!EditOps.selectBetweenBraces(editor)) toast("Put the caret next to a brace first")
         }
@@ -1012,9 +1066,20 @@ class MainActivity : Activity() {
             item("Zoom Out") { zoom { editor.send(Sci.SCI_ZOOMOUT) } }
             item("Restore Default Zoom") { zoom { editor.send(Sci.SCI_SETZOOM, 0) } }
         }
+        item("Toggle Full Screen Mode", checked = fullScreen && !distractionFree) { setScreenMode(full = !fullScreen || distractionFree, bare = false) }
+        item("Distraction Free Mode", checked = distractionFree) { setScreenMode(full = !distractionFree, bare = !distractionFree) }
+        item("View Current File in Browser", enabled = workspace.active.uri != null) { viewInAnotherApp(workspace.active, "text/html") }
+        item("Hide Lines") { if (!EditOps.hideLines(editor)) toast("The first and last line cannot be hidden") }
+        item("Show Hidden Lines") { editor.send(Sci.SCI_SHOWLINES, 0, editor.send(Sci.SCI_GETLINECOUNT) - 1) }
         sub("Tab") {
             val docs = workspace.docs
             val index = docs.indexOf(workspace.active)
+            val places = listOf("1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th")
+            for ((n, place) in places.withIndex()) {
+                item("$place Tab", enabled = n < docs.size) { workspace.activate(docs[n]) }
+            }
+            for (colour in 1..5) item("Apply Colour $colour", checked = workspace.active.colour == colour) { setTabColour(workspace.active, colour) }
+            item("Remove Colour") { setTabColour(workspace.active, 0) }
             item("First Tab") { workspace.activate(docs.first()) }
             item("Last Tab") { workspace.activate(docs.last()) }
             item("Next Tab") { workspace.activate(docs[(index + 1) % docs.size]) }
@@ -1321,6 +1386,315 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // region Tools, Window and ? menus
+
+    private fun MenuSpec.toolsMenu() {
+        for ((name, algorithm) in Hashes.ALGORITHMS) {
+            sub(name) {
+                item("Generate...") { hashDialog(name, algorithm) }
+                item("Generate from files...") { hashFiles(name, algorithm) }
+                item("Generate from selection into clipboard") {
+                    val start = editor.send(Sci.SCI_GETSELECTIONSTART)
+                    val end = editor.send(Sci.SCI_GETSELECTIONEND)
+                    if (end <= start) toast("Select some text first") else {
+                        editor.setClipboard(Hashes.of(algorithm, editor.range(start, end)))
+                        toast("$name digest copied")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun MenuSpec.windowMenu() {
+        sub("Sort By") {
+            fun type(doc: Doc) = doc.name.substringAfterLast('.', "").lowercase()
+            val orders = listOf<Pair<String, Comparator<Doc>>>(
+                "Name A to Z" to compareBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+                "Name Z to A" to compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.name },
+                "Path A to Z" to compareBy(String.CASE_INSENSITIVE_ORDER) { it.uri?.toString() ?: it.name },
+                "Path Z to A" to compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.uri?.toString() ?: it.name },
+                "Type A to Z" to compareBy<Doc> { type(it) }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+                "Type Z to A" to compareByDescending<Doc> { type(it) }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+                "Content Length Ascending" to compareBy { it.length },
+                "Content Length Descending" to compareByDescending { it.length },
+                "Modified Time Ascending" to compareBy { it.modified },
+                "Modified Time Descending" to compareByDescending { it.modified },
+                "Most Recently Used First" to compareByDescending { it.lastShown },
+            )
+            for ((label, order) in orders) item(label) { workspace.sortTabs(order) }
+        }
+        item("Windows...") { showWindowsList() }
+        for (doc in workspace.docs) {
+            item(doc.name, checked = doc === workspace.active) { workspace.activate(doc) }
+        }
+    }
+
+    /** Notepad++'s Windows dialog and the tab bar's list button: every open document, with what can be done to it. */
+    private fun showWindowsList() = showMenu("Windows") {
+        for (doc in workspace.docs.toList()) {
+            sub((if (workspace.isDirty(doc)) "\u25CF " else "") + doc.name) {
+                item("Activate") { workspace.activate(doc) }
+                item("Save") { save(doc) }
+                item("Close") { requestClose(doc) }
+            }
+        }
+    }
+
+    private fun MenuSpec.helpMenu() {
+        item("Pocketpad++ Home") { openLink("https://github.com/revelationnow/pocketpadpp") }
+        item("Pocketpad++ Project Page") { openLink("https://github.com/revelationnow/pocketpadpp") }
+        item("Notepad++ Online User Manual") { openLink("https://npp-user-manual.org/") }
+        item("Report a Problem") { openLink("https://github.com/revelationnow/pocketpadpp/issues") }
+        item("Debug Info...") { debugInfo() }
+        item("About Pocketpad++...") { about() }
+    }
+
+    private fun openLink(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            toast("No app can open $url")
+        }
+    }
+
+    private fun versionName(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+    } catch (e: Exception) {
+        "?"
+    }
+
+    private fun debugInfo() {
+        val keyboard = android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD) ?: "?"
+        val info = listOf(
+            "Pocketpad++ ${versionName()}",
+            "Scintilla 5.6.9, Lexilla 5.5.5",
+            "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+            "Device: ${Build.MANUFACTURER} ${Build.MODEL}, ${Build.SUPPORTED_ABIS.firstOrNull() ?: "?"}",
+            "Screen: ${resources.displayMetrics.widthPixels} x ${resources.displayMetrics.heightPixels}, density ${resources.displayMetrics.density}",
+            "Keyboard: $keyboard",
+            "Keyboard suggestions: ${if (editor.keyboardMode == ScintillaView.KeyboardMode.TEXT) "on" else "off"}",
+            "Theme: ${themeName.ifEmpty { "default" }}",
+            "Open documents: ${workspace.docs.size}",
+        ).joinToString("\n")
+        AlertDialog.Builder(themed)
+            .setTitle("Debug Info")
+            .setMessage(info)
+            .setPositiveButton("Copy to Clipboard") { _, _ -> editor.setClipboard(info) }
+            .setNegativeButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun about() {
+        AlertDialog.Builder(themed)
+            .setTitle("Pocketpad++ ${versionName()}")
+            .setMessage(
+                "A free, open-source text and code editor for Android in the spirit of Notepad++.\n\n" +
+                    "Built on Scintilla and Lexilla by Neil Hodgson and contributors, and on the language definitions, " +
+                    "themes and user-defined-language lexer of Notepad++ by Don Ho and contributors.\n\n" +
+                    "Pocketpad++ is an independent project, not affiliated with or endorsed by Notepad++.\n\n" +
+                    "Licence: GNU Affero General Public License 3.0",
+            )
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    /** Tools > Generate: the digest of a text, updated while it is typed. */
+    private fun hashDialog(name: String, algorithm: String) {
+        val input = EditText(themed).apply {
+            contentDescription = "Text to hash"
+            hint = "Text"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            maxLines = 5
+            setText(EditOps.selectionOrWord(editor).takeIf { editor.send(Sci.SCI_GETSELECTIONEND) > editor.send(Sci.SCI_GETSELECTIONSTART) } ?: "")
+        }
+        val eachLine = android.widget.CheckBox(themed).apply { text = "Treat each line as a separate string" }
+        val result = TextView(themed).apply {
+            contentDescription = "Digest"
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(0, dp(8f), 0, 0)
+        }
+        fun update() {
+            result.text = Hashes.ofText(algorithm, input.text.toString(), eachLine.isChecked)
+        }
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) = update()
+        })
+        eachLine.setOnCheckedChangeListener { _, _ -> update() }
+        update()
+        val content = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(eachLine)
+            addView(result)
+        }
+        AlertDialog.Builder(themed)
+            .setTitle("Generate $name digest")
+            .setView(ScrollView(themed).apply { addView(content) })
+            .setPositiveButton("Copy to Clipboard") { _, _ -> editor.setClipboard(result.text.toString()) }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private var hashRequest: Pair<String, String>? = null
+
+    private fun hashFiles(name: String, algorithm: String) {
+        hashRequest = name to algorithm
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQUEST_HASH)
+        } catch (e: Exception) {
+            toast("No file picker is available on this device")
+        }
+    }
+
+    /** Digests of files as "digest  name" lines, the layout of md5sum and friends. */
+    internal fun showFileHashes(name: String, algorithm: String, uris: List<Uri>) {
+        io.execute {
+            val lines = uris.map { uri ->
+                val digest = runCatching {
+                    (contentResolver.openInputStream(uri) ?: throw java.io.IOException("Cannot open the file")).use { input ->
+                        val md = java.security.MessageDigest.getInstance(algorithm)
+                        val buffer = ByteArray(1 shl 16)
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            md.update(buffer, 0, n)
+                        }
+                        md.digest().joinToString("") { "%02x".format(it) }
+                    }
+                }.getOrElse { "cannot read: ${it.message ?: it.javaClass.simpleName}" }
+                "$digest  ${FileIo.displayName(this, uri)}"
+            }.joinToString("\n")
+            ui.post {
+                if (destroyed) return@post
+                AlertDialog.Builder(themed)
+                    .setTitle("$name digest of ${uris.size} file(s)")
+                    .setMessage(lines)
+                    .setPositiveButton("Copy to Clipboard") { _, _ -> editor.setClipboard(lines) }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+        }
+    }
+
+    // endregion
+
+    private fun setTabColour(doc: Doc, colour: Int) {
+        doc.colour = colour
+        refreshTabs()
+    }
+
+    /** File > Open in Default Viewer and View > View Current File in Browser: hands the saved file to another app. */
+    private fun viewInAnotherApp(doc: Doc, forcedType: String?) {
+        val uri = doc.uri ?: return toast("Save the document first")
+        if (workspace.isDirty(doc)) toast("The other app sees the file as last saved")
+        val type = forcedType ?: contentResolver.getType(uri) ?: "text/plain"
+        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(intent, doc.name))
+        } catch (e: Exception) {
+            toast("No app can show this file")
+        }
+    }
+
+    /** On Selection > Open File: the selection as a file path, a content or file address, or a web link. */
+    private fun openSelectedFile() {
+        val text = EditOps.selectionOrWord(editor).trim()
+        when {
+            text.isEmpty() -> toast("Select a path or link first")
+            text.startsWith("content://") || text.startsWith("file://") -> openUris(listOf(Uri.parse(text)))
+            text.startsWith("http://") || text.startsWith("https://") -> openLink(text)
+            text.startsWith("/") && java.io.File(text).canRead() -> openUris(listOf(Uri.fromFile(java.io.File(text))))
+            else -> toast("This app cannot reach \"${text.take(60)}\"")
+        }
+    }
+
+    // Full screen hides the system bars; distraction free also hides the app's own bars. Back leaves either.
+    private var fullScreen = false
+    private var distractionFree = false
+
+    private fun setScreenMode(full: Boolean, bare: Boolean) {
+        fullScreen = full
+        distractionFree = full && bare
+        for (bar in chromeBars) bar.visibility = if (distractionFree) View.GONE else View.VISIBLE
+        applySystemBars()
+        if (full) toast("Press Back to leave ${if (distractionFree) "distraction free" else "full screen"} mode")
+    }
+
+    private fun applySystemBars() {
+        val light = if (palette.dark) 0 else
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or (if (Build.VERSION.SDK_INT >= 27) View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0)
+        val immersive = if (fullScreen) {
+            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        } else {
+            0
+        }
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = light or immersive
+    }
+
+    /** Search > Find characters in range: non-ASCII, ASCII, or any range of byte values. */
+    private fun findCharsInRange() {
+        fun number(name: String, value: String) = EditText(themed).apply {
+            contentDescription = name
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(value)
+            minEms = 3
+        }
+        val nonAscii = RadioButton(themed).apply { text = "Non-ASCII Characters (128-255)" }
+        val ascii = RadioButton(themed).apply { text = "ASCII Characters (0-127)" }
+        val custom = RadioButton(themed).apply { text = "My Range (0-255):" }
+        val from = number("Range from", "128")
+        val to = number("Range to", "255")
+        val up = android.widget.CheckBox(themed).apply { text = "Search upwards" }
+        val wrap = android.widget.CheckBox(themed).apply {
+            text = "Wrap around"
+            isChecked = true
+        }
+        val content = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(RadioGroup(themed).apply {
+                addView(nonAscii)
+                addView(ascii)
+                addView(custom)
+            })
+            addView(LinearLayout(themed).apply {
+                addView(from)
+                addView(TextView(themed).apply { text = "  to  " })
+                addView(to)
+            })
+            addView(up)
+            addView(wrap)
+        }
+        nonAscii.isChecked = true
+        AlertDialog.Builder(themed)
+            .setTitle("Find Characters in Range")
+            .setView(ScrollView(themed).apply { addView(content) })
+            .setPositiveButton("Find") { _, _ ->
+                val (low, high) = when {
+                    nonAscii.isChecked -> 128 to 255
+                    ascii.isChecked -> 0 to 127
+                    else -> (from.text.toString().toIntOrNull() ?: 0).coerceIn(0, 255) to (to.text.toString().toIntOrNull() ?: 255).coerceIn(0, 255)
+                }
+                if (!EditOps.findCharInRange(editor, low, high, forward = !up.isChecked, wrap = wrap.isChecked)) {
+                    toast("No character in the range $low to $high was found")
+                }
+                editor.requestFocus()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun toggleBookmark() {
         val line = editor.send(Sci.SCI_LINEFROMPOSITION, editor.send(Sci.SCI_GETCURRENTPOS))
         val marker = ThemeApplier.BOOKMARK_MARKER
@@ -1368,6 +1742,7 @@ class MainActivity : Activity() {
     private companion object {
         const val REQUEST_OPEN = 1
         const val REQUEST_SAVE_AS = 2
+        const val REQUEST_HASH = 3
         const val MAX_RECENT = 10
         const val DARK_THEME = "DarkModeDefault.xml"
         const val IME_LOG_LINES = 200

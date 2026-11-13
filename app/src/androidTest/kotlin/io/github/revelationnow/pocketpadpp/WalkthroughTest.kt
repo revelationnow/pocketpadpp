@@ -1353,6 +1353,111 @@ class WalkthroughTest {
         tapDescribed("Close")
     }
 
+    @Test
+    fun toolsWindowAndOtherCommands() {
+        fun clipboard() = onUi { it.editor.getClipboard() }
+        fun names() = onUi { activity -> activity.workspace.docs.map { it.name } }
+        fun active() = onUi { it.workspace.active.name }
+
+        // Tools: digests of the selection, in a dialog and straight to the clipboard.
+        setText("abc")
+        sci(Sci.SCI_SELECTALL)
+        openMenu("Tools", "MD5", "Generate from selection into clipboard")
+        assertEquals("900150983cd24fb0d6963f7d28e17f72", clipboard())
+        openMenu("Tools", "SHA-256", "Generate...")
+        assertTrue(onScreen("Generate SHA-256 digest"))
+        val sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        waitUntil("the digest of the selection") { device.findObject(By.desc("Digest"))?.text == sha }
+        shot("hash-dialog")
+        tapButton("Copy to Clipboard")
+        assertEquals(sha, clipboard())
+
+        // Edit: custom date, redact.
+        setText("")
+        openMenu("Edit", "Insert", "Date Time (customized)")
+        assertTrue("date in the customized format: ${text()}", Regex("""\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}""").matches(text()))
+        setText("secret")
+        sci(Sci.SCI_SETSEL, 0, 3)
+        openMenu("Edit", "On Selection", "Redact Selection")
+        assertEquals("\u2588\u2588\u2588ret", text())
+
+        // Search: characters in a range of byte values.
+        setText("abc \u00e9 x")
+        sci(Sci.SCI_GOTOPOS, 0)
+        openMenu("Search", "Find characters in range...")
+        assertTrue(onScreen("Find Characters in Range"))
+        shot("find-characters-in-range")
+        tapButton("Find")
+        assertEquals("the non-ASCII character is selected", "4-6", selection())
+
+        // View: hide lines, full screen, distraction free.
+        setText("a\nb\nc\nd\n")
+        sci(Sci.SCI_SETSEL, 2, 5)
+        openMenu("View", "Hide Lines")
+        assertEquals(0L, sci(Sci.SCI_GETLINEVISIBLE, 1))
+        shot("hidden-lines")
+        openMenu("View", "Show Hidden Lines")
+        assertEquals(1L, sci(Sci.SCI_GETLINEVISIBLE, 1))
+        openMenu("View", "Distraction Free Mode")
+        tapDescribed("Close menu")
+        assertTrue("the toolbar is hidden in distraction free mode", gone("Save"))
+        shot("distraction-free")
+        // Back closes the keyboard first if it is showing, then leaves the mode.
+        device.pressBack()
+        if (!onScreen("Save", 1500)) device.pressBack()
+        assertTrue("Back brings the bars back", onScreen("Save"))
+
+        // Window: sorting and the list of open documents; tab colours and numbered tabs.
+        for (name in listOf("b.txt", "a.md", "c.txt")) {
+            val file = File(context.cacheDir, name).apply { writeText("file $name\n") }
+            onUi { it.openUris(listOf(Uri.fromFile(file))) }
+            waitUntil("$name to open") { active() == name }
+        }
+        assertEquals(listOf("new 1", "b.txt", "a.md", "c.txt"), names())
+        openMenu("Window", "Sort By", "Name A to Z")
+        assertEquals(listOf("a.md", "b.txt", "c.txt", "new 1"), names())
+        openMenu("Window", "Sort By", "Type A to Z")
+        assertEquals("by extension, then name", listOf("new 1", "a.md", "b.txt", "c.txt"), names())
+        tapDescribed("Tab list")
+        shot("windows-list")
+        menu("a.md")
+        menu("Activate")
+        assertEquals("a.md", active())
+        openMenu("View", "Tab", "3rd Tab")
+        assertEquals("b.txt", active())
+        openMenu("View", "Tab", "Apply Colour 2")
+        tapDescribed("Close menu")
+        assertEquals(2, onUi { it.workspace.active.colour })
+        shot("tab-colour")
+
+        // Read-only for every document, including those in the background.
+        openMenu("Edit", "Set Read-Only for All Documents")
+        assertEquals(1L, sci(Sci.SCI_GETREADONLY))
+        tap("c.txt")
+        assertEquals("a background tab is read-only too once shown", 1L, sci(Sci.SCI_GETREADONLY))
+        openMenu("Edit", "Clear Read-Only for All Documents")
+        assertEquals(0L, sci(Sci.SCI_GETREADONLY))
+
+        // The ? menu.
+        openMenu("?", "Debug Info...")
+        assertTrue(onScreen("Debug Info"))
+        shot("debug-info")
+        tapButton("Copy to Clipboard")
+        assertTrue(clipboard().contains("Scintilla 5.6.9"))
+        openMenu("?", "About Pocketpad++...")
+        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("Pocketpad\\+\\+ 0\\.1\\..*"))), 3000) == true)
+        shot("about")
+        tapButton("OK")
+
+        // File > Exit closes the app; the session, tab colour included, is there on the next start.
+        openMenu("File", "Exit")
+        SystemClock.sleep(1500)
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        // (The untitled tab held text put there by the test without typing, so it had nothing to save.)
+        waitUntil("the session to be restored") { names() == listOf("a.md", "b.txt", "c.txt") }
+        assertEquals("the tab colour is remembered", 2, onUi { activity -> activity.workspace.docs.first { it.name == "b.txt" }.colour })
+    }
+
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */
     @Test
     fun readmeScreens() {

@@ -22,6 +22,13 @@ class Palette(val dark: Boolean) {
     val tabInactiveText = pick(0xFF606060, 0xFFA0A0A0)
     val tabDirty = pick(0xFFC02020, 0xFFFF7070)
 
+    /** View > Tab > Apply Colour 1 to 5: yellow, green, blue, orange, pink. */
+    val tabColours = if (dark) {
+        intArrayOf(0xFF6B5E1E.toInt(), 0xFF2F5E33.toInt(), 0xFF2B4F78.toInt(), 0xFF7A4A1E.toInt(), 0xFF6E3564.toInt())
+    } else {
+        intArrayOf(0xFFF6E58D.toInt(), 0xFFB8E2A0.toInt(), 0xFFA9CEF4.toInt(), 0xFFF7C592.toInt(), 0xFFEDB4E3.toInt())
+    }
+
     // Notepad++'s find status colours, lightened where the background is dark.
     val findMessage = pick(0xFF0000FF, 0xFF7FB0FF)
     val findNotFound = pick(0xFFFF0000, 0xFFFF7070)
