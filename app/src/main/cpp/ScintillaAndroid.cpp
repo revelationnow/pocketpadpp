@@ -343,6 +343,14 @@ void ScintillaAndroid::ImeSetComposingText(std::string_view text, int newCursorP
 
 void ScintillaAndroid::ImeCommitText(std::string_view text, int newCursorPosition) {
 	if (compStart < 0) {
+		if (text.empty()) {
+			// Committing nothing over a selection is how some keyboards delete it.
+			if (!sel.Empty()) {
+				ClearSelection();
+				EnsureCaretVisible();
+			}
+			return;
+		}
 		const Sci::Position before = SelectionStart().Position();
 		TypeText(text);
 		if (newCursorPosition != 1) {

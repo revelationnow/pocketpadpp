@@ -87,9 +87,9 @@ internal class AndroidSurface private constructor(var canvas: Canvas?, private v
     }
 
     override fun release() {
+        // The bitmap is left to the garbage collector: a display list recorded earlier may still draw it.
         canvas = null
         patternShader = null
-        bitmap?.recycle()
     }
 
     override fun fillRect(l: Float, t: Float, r: Float, b: Float, argb: Int) {

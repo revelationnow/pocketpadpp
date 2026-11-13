@@ -254,6 +254,14 @@ public final class Harness implements SciHost {
         eq("one  three", text(), "empty composing text deletes it");
         eq("[4, 4, -1, -1]", Arrays.toString(ime()), "composition ended");
 
+        // Committing empty text deletes the selection and nothing else.
+        setText("keep drop keep");
+        send(Sci.SCI_SETSEL, 4, 9);
+        ScintillaNative.imeCommitText(ptr, "", 1);
+        eq("keep keep", text(), "empty commit deletes the selection");
+        ScintillaNative.imeCommitText(ptr, "", 1);
+        eq("keep keep", text(), "empty commit without a selection changes nothing");
+
         // The keyboard adopts an existing word and rewrites it.
         setText("foo bar baz");
         send(Sci.SCI_GOTOPOS, 7, 0);

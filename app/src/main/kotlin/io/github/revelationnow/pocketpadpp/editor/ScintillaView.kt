@@ -122,21 +122,6 @@ class ScintillaView @JvmOverloads constructor(
     private val timers = arrayOfNulls<Runnable>(8)
     private var idleOn = false
 
-    init {
-        ensurePlatform(context)
-        ptr = ScintillaNative.create(this)
-        isFocusable = true
-        isFocusableInTouchMode = true
-        send(Sci.SCI_SETCARETWIDTH, (2 * density).roundToInt().coerceIn(1, 20).toLong())
-        send(Sci.SCI_SETSCROLLWIDTHTRACKING, 1)
-        send(Sci.SCI_SETSCROLLWIDTH, 1)
-        send(Sci.SCI_SETMULTIPLESELECTION, 1)
-        send(Sci.SCI_SETADDITIONALSELECTIONTYPING, 1)
-        send(Sci.SCI_SETMULTIPASTE, Sci.SC_MULTIPASTE_EACH.toLong())
-        send(Sci.SCI_SETEXTRAASCENT, density.roundToInt().toLong())
-        send(Sci.SCI_SETEXTRADESCENT, density.roundToInt().toLong())
-    }
-
     // region Public API
 
     fun send(msg: Int, wParam: Long = 0, lParam: Long = 0): Long =
@@ -734,14 +719,18 @@ class ScintillaView @JvmOverloads constructor(
         val what = pendingUpdate
         pendingUpdate = 0
         if (ptr == 0L) return@Runnable
-        if (what and (Sci.SC_UPDATE_SELECTION or Sci.SC_UPDATE_CONTENT) != 0) {
-            if (touch != Touch.SCROLL && touch != Touch.HANDLE && touch != Touch.SELECT_DRAG && scroller.isFinished) {
+        // SC_UPDATE_CONTENT also fires when lines are merely styled as they scroll into view, so only a moved
+        // caret or changed text counts as a reason to bring the caret back on screen.
+        val caretMoved = what and Sci.SC_UPDATE_SELECTION != 0
+        val textChanged = what and Sci.SC_UPDATE_TEXT != 0
+        if (caretMoved || textChanged) {
+            if (touch == Touch.NONE && scroller.isFinished) {
                 revealCaret()
             }
             syncIme()
-            if (!hasSelection() && touch == Touch.NONE && actionMode != null && what and Sci.SC_UPDATE_CONTENT != 0) {
-                actionMode?.finish()
-            }
+        }
+        if (textChanged && !hasSelection() && touch == Touch.NONE) {
+            actionMode?.finish()
         }
         onStateChanged?.invoke()
         invalidate()
@@ -809,6 +798,23 @@ class ScintillaView @JvmOverloads constructor(
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         if (ptr != 0L) ScintillaNative.setFocus(ptr, hasWindowFocus && hasFocus())
+    }
+
+    // Kept after every property: creating the native editor can call back into this object straight away,
+    // and Kotlin initialises properties and init blocks in the order they appear.
+    init {
+        ensurePlatform(context)
+        ptr = ScintillaNative.create(this)
+        isFocusable = true
+        isFocusableInTouchMode = true
+        send(Sci.SCI_SETCARETWIDTH, (2 * density).roundToInt().coerceIn(1, 20).toLong())
+        send(Sci.SCI_SETSCROLLWIDTHTRACKING, 1)
+        send(Sci.SCI_SETSCROLLWIDTH, 1)
+        send(Sci.SCI_SETMULTIPLESELECTION, 1)
+        send(Sci.SCI_SETADDITIONALSELECTIONTYPING, 1)
+        send(Sci.SCI_SETMULTIPASTE, Sci.SC_MULTIPASTE_EACH.toLong())
+        send(Sci.SCI_SETEXTRAASCENT, density.roundToInt().toLong())
+        send(Sci.SCI_SETEXTRADESCENT, density.roundToInt().toLong())
     }
 
     companion object {
