@@ -1235,6 +1235,8 @@ class WalkthroughTest {
             sci(Sci.SCI_GETLINESELSTARTPOSITION, 0) to sci(Sci.SCI_GETLINESELENDPOSITION, 0))
         assertEquals("nothing scrolled", 0L, sci(Sci.SCI_GETFIRSTVISIBLELINE))
         assertEquals("Alt lets go after the drag", 0, held())
+        assertTrue("the status bar counts what is selected in the column",
+            device.wait(Until.hasObject(By.text(Pattern.compile(".*Sel 9 .*4 carets.*"))), 2500) == true)
         onUi { it.editor.typeText("-") }
         assertEquals("typing replaces the column on every line, short lines included",
             "ab-fgh\nab-fgh\nab-\nab-fgh\n", text())
@@ -1281,6 +1283,105 @@ class WalkthroughTest {
         assertEquals("09abXYfgh\n10abXYfgh\n11abXY\n12abXYfgh\n13", text())
         sci(Sci.SCI_UNDO)
         assertEquals("the Column Editor is one undo step", "abXYfgh\nabXYfgh\nabXY\nabXYfgh\n", text())
+    }
+
+    /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */
+    @Test
+    fun readmeScreens() {
+        val python = """
+            # Inventory report for the corner shop.
+            import csv
+            from dataclasses import dataclass
+
+            LOW_STOCK = 5
+
+
+            @dataclass
+            class Item:
+                name: str
+                price: float
+                count: int
+
+                @property
+                def value(self) -> float:
+                    return self.price * self.count
+
+
+            def load(path: str) -> list[Item]:
+                with open(path, newline="") as f:
+                    rows = csv.DictReader(f)
+                    return [Item(r["name"],
+                                 float(r["price"]),
+                                 int(r["count"]))
+                            for r in rows]
+
+
+            def report(items: list[Item]) -> None:
+                for item in sorted(items, key=str):
+                    low = item.count < LOW_STOCK
+                    mark = "!" if low else " "
+                    print(mark, item.name, item.value)
+                # TODO: totals per category
+
+
+            if __name__ == "__main__":
+                report(load("stock.csv"))
+        """.trimIndent() + "\n"
+        val files = listOf(
+            "notes.md" to "# Shop notes\n\n- order **flour** on Monday\n- call the *baker*\n",
+            "style.css" to "body {\n  margin: 0;\n  color: #202020;\n}\n",
+            "inventory.py" to python,
+        )
+        for ((name, content) in files) {
+            val file = File(context.cacheDir, name).apply { writeText(content) }
+            onUi { it.openUris(listOf(Uri.fromFile(file))) }
+            waitUntil("$name to open") { onUi { it.workspace.active.name } == name }
+        }
+        fun hideKeyboard() {
+            onUi { activity ->
+                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                    .hideSoftInputFromWindow(activity.editor.windowToken, 0)
+            }
+            SystemClock.sleep(900)
+            sci(Sci.SCI_COLOURISE, 0, -1)
+        }
+        hideKeyboard()
+        shot("readme-light")
+
+        // A column selection, with the keys row showing Alt locked.
+        tap("Alt")
+        tap("Alt")
+        sci(Sci.SCI_SETRECTANGULARSELECTIONANCHOR, sci(Sci.SCI_FINDCOLUMN, 9, 4))
+        sci(Sci.SCI_SETRECTANGULARSELECTIONCARET, sci(Sci.SCI_FINDCOLUMN, 11, 9))
+        shot("readme-column")
+        tap("Alt")
+        sci(Sci.SCI_GOTOPOS, 0)
+
+        tapDescribed("Menu")
+        menu("Edit")
+        menu("Line Operations")
+        shot("readme-menu")
+        tapDescribed("Close menu")
+
+        tap("Find")
+        device.findObjects(By.clazz("android.widget.EditText"))[0].text = "item"
+        tapDescribed("Find next")
+        tapDescribed("Count matches")
+        shot("readme-find")
+        tapDescribed("Close")
+
+        openMenu("Settings", "Dark mode")
+        waitUntil("dark mode") { brightness(sci(Sci.SCI_STYLEGETBACK, Sci.STYLE_DEFAULT.toLong())) < 128 }
+        tapDescribed("Close menu")
+        hideKeyboard()
+        sci(Sci.SCI_GOTOPOS, 0)
+        shot("readme-dark")
+
+        openMenu("Settings", "Theme", "Monokai")
+        tapDescribed("Close menu")
+        sci(Sci.SCI_FOLDLINE, 19, Sci.SC_FOLDACTION_CONTRACT.toLong())
+        hideKeyboard()
+        shot("readme-monokai")
     }
 
     private companion object {

@@ -483,7 +483,15 @@ class MainActivity : Activity() {
         val end = editor.send(Sci.SCI_GETSELECTIONEND)
         val carets = editor.send(Sci.SCI_GETSELECTIONS)
         val parts = mutableListOf("Ln $line, Col $column")
-        if (end > start) parts += "Sel ${editor.send(Sci.SCI_COUNTCHARACTERS, start, end)}"
+        // With several selections (a column, or multi-select) the count is what is selected in each, added up.
+        val selected = if (carets > 1) {
+            (0 until carets).sumOf { n ->
+                editor.send(Sci.SCI_COUNTCHARACTERS, editor.send(Sci.SCI_GETSELECTIONNSTART, n), editor.send(Sci.SCI_GETSELECTIONNEND, n))
+            }
+        } else {
+            editor.send(Sci.SCI_COUNTCHARACTERS, start, end)
+        }
+        if (selected > 0) parts += "Sel $selected"
         if (carets > 1) parts += "$carets carets"
         parts += "${editor.send(Sci.SCI_GETLINECOUNT)} lines"
         if (editor.send(Sci.SCI_GETREADONLY) != 0L) parts += "Read-only"
