@@ -1462,6 +1462,93 @@ class WalkthroughTest {
         assertEquals("the tab colour is remembered", 2, onUi { activity -> activity.workspace.docs.first { it.name == "b.txt" }.colour })
     }
 
+    @Test
+    fun changeHistoryPanelsAndFileCommands() {
+        fun clipboard() = onUi { it.editor.getClipboard() }
+        fun names() = onUi { activity -> activity.workspace.docs.map { it.name } }
+        fun active() = onUi { it.workspace.active.name }
+        fun line() = sci(Sci.SCI_LINEFROMPOSITION, sci(Sci.SCI_GETCURRENTPOS))
+        val history = Sci.SC_MASK_HISTORY.toLong()
+
+        // Change history: typed lines get a mark; a loaded file starts without any.
+        val file = File(context.cacheDir, "old.txt").apply { writeText("one\ntwo\nthree\nfour\n") }
+        onUi { it.openUris(listOf(Uri.fromFile(file))) }
+        waitUntil("the file to open") { active() == "old.txt" }
+        assertEquals("a loaded file has no changed lines", 0L, (0L..3L).sumOf { sci(Sci.SCI_MARKERGET, it) and history })
+        sci(Sci.SCI_GOTOPOS, 4)
+        onUi { it.editor.typeText("X") }
+        sci(Sci.SCI_GOTOPOS, 15)
+        onUi { it.editor.typeText("Y") }
+        assertTrue("typing marks the line as changed", sci(Sci.SCI_MARKERGET, 1) and history != 0L)
+        sci(Sci.SCI_GOTOPOS, 0)
+        shot("change-history")
+        openMenu("Search", "Changed Lines", "Go to Next Change")
+        assertEquals(1L, line())
+        openMenu("Search", "Changed Lines", "Go to Next Change")
+        assertEquals(3L, line())
+        openMenu("Search", "Changed Lines", "Go to Previous Change")
+        assertEquals(1L, line())
+        tap("Save")
+        waitUntil("the save") { !onUi { it.workspace.isDirty(it.workspace.active) } }
+        assertEquals("one\nXtwo\nthree\nYfour\n", file.readText())
+        openMenu("Search", "Changed Lines", "Clear Change History")
+        assertEquals(0L, (0L..3L).sumOf { sci(Sci.SCI_MARKERGET, it) and history })
+
+        // Rename and delete act on the file in storage.
+        openMenu("File", "Rename...")
+        device.wait(Until.findObject(By.desc("New name")), 4000)!!.text = "new.md"
+        tapButton("OK")
+        waitUntil("the rename") { active() == "new.md" }
+        val renamed = File(context.cacheDir, "new.md")
+        assertTrue("the file was renamed in storage", renamed.exists() && !file.exists())
+
+        // Sessions: the open files as a Notepad++-style file, and back.
+        val other = File(context.cacheDir, "other.txt").apply { writeText("other\n") }
+        onUi { it.openUris(listOf(Uri.fromFile(other))) }
+        waitUntil("the second file") { active() == "other.txt" }
+        val session = onUi { it.workspace.exportSession() }
+        assertTrue("the session lists both files", session.contains("new.md") && session.contains("other.txt"))
+        openMenu("File", "Close All")
+        waitUntil("everything to close") { names() == listOf("new 1") }
+        onUi { it.loadSessionText(session) }
+        waitUntil("the session to load") { names().containsAll(listOf("new.md", "other.txt")) }
+
+        onUi { activity -> activity.workspace.activate(activity.workspace.docs.first { it.name == "new.md" }) }
+        openMenu("File", "Delete from Storage")
+        assertTrue(onScreen("Delete"))
+        shot("delete-dialog")
+        tapButton("Delete")
+        waitUntil("the tab to close") { "new.md" !in names() }
+        assertTrue("the file is gone from storage", !renamed.exists())
+
+        // Character Panel and Clipboard History insert at the caret.
+        tap("New")
+        openMenu("Edit", "Character Panel")
+        shot("character-panel")
+        menu(" 65   41   A")
+        assertEquals("A", text())
+        sci(Sci.SCI_SELECTALL)
+        sci(Sci.SCI_COPY)
+        sci(Sci.SCI_DOCUMENTEND)
+        openMenu("Edit", "Clipboard History")
+        menu("A")
+        assertEquals("AA", text())
+
+        // The search engine choice is kept.
+        openMenu("Edit", "On Selection", "Change Search Engine...")
+        menu("DuckDuckGo")
+        shot("search-engine")
+        tapDescribed("Close menu")
+        assertTrue(context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("searchEngine", "")!!.contains("duckduckgo"))
+
+        // Non-printing characters get a label.
+        setText("a\u00a0b\u200bc")
+        openMenu("View", "Show Symbol", "Show Non-Printing Characters")
+        tapDescribed("Close menu")
+        shot("non-printing-characters")
+        assertTrue(context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("showNpc", false))
+    }
+
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */
     @Test
     fun readmeScreens() {

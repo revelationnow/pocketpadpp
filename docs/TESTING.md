@@ -31,6 +31,8 @@ and saves a screenshot at every step. It covers:
 - column selection by dragging with Alt held and with Alt+Shift+arrows, and the Column Editor with text and numbers
 - the Tools digests, Window sorting and the document list, tab colours, read-only for all documents, redact,
   find characters in range, hide lines, distraction free mode, and the ? menu
+- change history marks and navigation, rename and delete, saving and loading a session, the Character Panel,
+  the clipboard history and the search engine choice
 - highlighting for C++, Python, HTML and JSON
 
 To run it yourself, start an emulator or plug in a phone with USB debugging and run `tools/run_ui_tests.sh`.

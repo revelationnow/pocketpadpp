@@ -521,6 +521,49 @@ object EditOps {
         return true
     }
 
+    private const val HISTORY = Sci.SC_CHANGE_HISTORY_ENABLED or Sci.SC_CHANGE_HISTORY_MARKERS
+
+    /**
+     * Turns on change history for the document on screen: changed lines get a mark in the margin, orange
+     * until saved and green afterwards. Scintilla only allows this while there is nothing to undo.
+     */
+    fun enableChangeHistory(sci: SciApi) {
+        sci.send(Sci.SCI_SETCHANGEHISTORY, HISTORY.toLong())
+    }
+
+    private fun changed(sci: SciApi, line: Long): Boolean =
+        line >= 0 && sci.send(Sci.SCI_MARKERGET, line) and Sci.SC_MASK_HISTORY.toLong() != 0L
+
+    /** Search > Changed Lines > Go to Next / Previous Change: to the start of the next run of changed lines, wrapping. */
+    fun goToChange(sci: SciApi, forward: Boolean): Boolean {
+        val mask = Sci.SC_MASK_HISTORY.toLong()
+        val count = sci.send(Sci.SCI_GETLINECOUNT)
+        var line = sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETCURRENTPOS))
+        var target: Long
+        if (forward) {
+            while (line < count && changed(sci, line)) line++
+            // SCI_MARKERNEXT does not see change history marks (SCI_MARKERGET and SCI_MARKERPREVIOUS do),
+            // so the lines are asked one by one.
+            target = (line until count).firstOrNull { changed(sci, it) } ?: (0L until line).firstOrNull { changed(sci, it) } ?: -1L
+        } else {
+            while (line >= 0 && changed(sci, line)) line--
+            target = if (line >= 0) sci.send(Sci.SCI_MARKERPREVIOUS, line, mask) else -1
+            if (target < 0) target = sci.send(Sci.SCI_MARKERPREVIOUS, count - 1, mask)
+            while (target > 0 && changed(sci, target - 1)) target--
+        }
+        if (target < 0) return false
+        sci.send(Sci.SCI_ENSUREVISIBLEENFORCEPOLICY, target)
+        sci.send(Sci.SCI_GOTOLINE, target)
+        return true
+    }
+
+    /** Search > Changed Lines > Clear Change History. As in Notepad++ this also empties the undo history. */
+    fun clearChangeHistory(sci: SciApi) {
+        sci.send(Sci.SCI_SETCHANGEHISTORY, 0)
+        sci.send(Sci.SCI_EMPTYUNDOBUFFER)
+        sci.send(Sci.SCI_SETCHANGEHISTORY, HISTORY.toLong())
+    }
+
     /** Character, word and line counts for View > Summary. */
     fun summary(sci: SciApi): Triple<Long, Long, Long> {
         val length = sci.send(Sci.SCI_GETLENGTH)

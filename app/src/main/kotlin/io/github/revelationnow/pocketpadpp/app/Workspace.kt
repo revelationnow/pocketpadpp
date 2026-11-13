@@ -189,6 +189,7 @@ class Workspace(
         docs += doc
         active = doc
         applyLanguage(doc)
+        EditOps.enableChangeHistory(editor)
     }
 
     // region Tabs
@@ -216,6 +217,7 @@ class Workspace(
             name = "new $number"
         }
         activate(doc)
+        EditOps.enableChangeHistory(editor)
         return doc
     }
 
@@ -354,6 +356,8 @@ class Workspace(
     // region Content
 
     private fun setContent(doc: Doc, utf8: ByteArray, eol: Eol?) {
+        // Loading is not a change: history is off while the text goes in and starts afresh afterwards.
+        editor.send(Sci.SCI_SETCHANGEHISTORY, 0)
         editor.send(Sci.SCI_SETUNDOCOLLECTION, 0)
         editor.send(Sci.SCI_CLEARALL)
         editor.sendBytes(Sci.SCI_ADDTEXT, utf8.size.toLong(), utf8)
@@ -362,6 +366,7 @@ class Workspace(
         editor.send(Sci.SCI_SETSAVEPOINT)
         if (eol != null) editor.send(Sci.SCI_SETEOLMODE, eol.sciMode.toLong())
         editor.send(Sci.SCI_GOTOPOS, 0)
+        EditOps.enableChangeHistory(editor)
         doc.changedSinceBackup = false
     }
 
@@ -466,7 +471,7 @@ class Workspace(
         doc.backupName = null
     }
 
-    fun saveSession() {
+    private fun sessionNow(withBackups: Boolean): Session {
         saveViewState()
         val entries = docs.map { doc ->
             SessionEntry(
@@ -480,12 +485,40 @@ class Workspace(
                 firstVisibleLine = doc.firstDocLine,
                 xOffset = doc.xOffset.toInt(),
                 tabColour = doc.colour,
-                backup = doc.backupName,
+                backup = if (withBackups) doc.backupName else null,
                 untitledNumber = doc.untitledNumber,
             )
         }
+        return Session(docs.indexOf(active), entries)
+    }
+
+    /** File > Save Session: the open files that exist in storage, as a Notepad++-style session file. */
+    fun exportSession(): String {
+        val files = sessionNow(withBackups = false).entries.filter { it.location != null }
+        return SessionStore.write(Session(0, files))
+    }
+
+    /** File > Rename: a new name, and for a stored file its new address. */
+    fun renamed(doc: Doc, uri: Uri?, name: String) {
+        if (uri != null) doc.uri = uri
+        doc.name = name
+        if (doc.language === languages.normal) {
+            val detected = languages.forFileName(name)
+            if (detected !== languages.normal) {
+                doc.language = detected
+                doc.lexerApplied = false
+                if (doc === active) {
+                    applyLanguage(doc)
+                    editor.send(Sci.SCI_COLOURISE, 0, -1)
+                }
+            }
+        }
+        onTabsChanged?.invoke()
+    }
+
+    fun saveSession() {
         try {
-            sessionFile.writeText(SessionStore.write(Session(docs.indexOf(active), entries)))
+            sessionFile.writeText(SessionStore.write(sessionNow(withBackups = true)))
         } catch (e: IOException) {
             // Nothing useful to do; the next start begins with an empty tab.
         }

@@ -239,8 +239,10 @@ object ThemeApplier {
         // Margins: line numbers, bookmarks, fold markers.
         sci.send(Sci.SCI_SETMARGINTYPEN, 0, Sci.SC_MARGIN_NUMBER.toLong())
         sci.send(Sci.SCI_SETMARGINTYPEN, 1, Sci.SC_MARGIN_SYMBOL.toLong())
-        sci.send(Sci.SCI_SETMARGINMASKN, 1, (1L shl BOOKMARK_MARKER))
-        sci.send(Sci.SCI_SETMARGINWIDTHN, 1, 0)
+        // A narrow strip for the change history marks. The bookmark marker stays out of every margin's mask,
+        // which is what makes Scintilla draw it as a tint on the line.
+        sci.send(Sci.SCI_SETMARGINMASKN, 1, Sci.SC_MASK_HISTORY.toLong())
+        sci.send(Sci.SCI_SETMARGINWIDTHN, 1, (4 * metrics.pixelScale).toLong().coerceAtLeast(3))
         sci.send(Sci.SCI_SETMARGINTYPEN, 2, Sci.SC_MARGIN_SYMBOL.toLong())
         sci.send(Sci.SCI_SETMARGINMASKN, 2, Sci.SC_MASK_FOLDERS.toLong() and 0xFFFFFFFFL)
         sci.send(Sci.SCI_SETMARGINWIDTHN, 2, metrics.foldMarginWidth.toLong())

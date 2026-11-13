@@ -4,6 +4,7 @@ import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
+import io.github.revelationnow.pocketpadpp.core.Invisibles
 import io.github.revelationnow.pocketpadpp.core.LanguageSetup
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
@@ -583,6 +584,35 @@ private fun testMoreEditOps() {
     ok(EditOps.hideLines(sci), "hide lines")
     eq(listOf(1L, 0L, 0L, 1L), (0L..3L).map { sci.send(Sci.SCI_GETLINEVISIBLE, it) }, "the selected lines are hidden")
     sci.send(Sci.SCI_SHOWLINES, 0, 4)
+
+    // Change history
+    val historyMask = Sci.SC_MASK_HISTORY.toLong()
+    sci.send(Sci.SCI_SETCHANGEHISTORY, 0)
+    sci.text = "one\ntwo\nthree\nfour\n"
+    EditOps.enableChangeHistory(sci)
+    eq(0L, (0L..3L).sumOf { sci.send(Sci.SCI_MARKERGET, it) and historyMask }, "a freshly loaded text has no changed lines")
+    ok(!EditOps.goToChange(sci, forward = true), "so there is no change to go to")
+    sci.send(Sci.SCI_GOTOPOS, 4)
+    ScintillaNative.insertText(sci.ptr, "X")
+    sci.send(Sci.SCI_GOTOPOS, 15)
+    ScintillaNative.insertText(sci.ptr, "Y")
+    ok(sci.send(Sci.SCI_MARKERGET, 1) and historyMask != 0L && sci.send(Sci.SCI_MARKERGET, 3) and historyMask != 0L, "edited lines are marked")
+    eq(0L, sci.send(Sci.SCI_MARKERGET, 2) and historyMask, "other lines are not")
+    sci.send(Sci.SCI_GOTOPOS, 0)
+    ok(EditOps.goToChange(sci, forward = true), "go to next change")
+    eq(1L, sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETCURRENTPOS)), "first changed line")
+    EditOps.goToChange(sci, forward = true)
+    eq(3L, sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETCURRENTPOS)), "second changed line")
+    EditOps.goToChange(sci, forward = true)
+    eq(1L, sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETCURRENTPOS)), "next change wraps around")
+    EditOps.goToChange(sci, forward = false)
+    eq(3L, sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETCURRENTPOS)), "previous change wraps too")
+    EditOps.clearChangeHistory(sci)
+    eq(0L to 0L, (0L..3L).sumOf { sci.send(Sci.SCI_MARKERGET, it) and historyMask } to sci.send(Sci.SCI_CANUNDO), "clearing removes the marks and the undo history")
+    eq("one\nXtwo\nthree\nYfour\n", sci.text, "and keeps the text")
+    sci.send(Sci.SCI_SETCHANGEHISTORY, 0)
+    Invisibles.apply(sci, nonPrinting = true, control = false)
+    Invisibles.apply(sci, nonPrinting = false, control = true)
 
     // Column Editor
     eq(listOf("1", "1", "3", "3", "5"), TextTransforms.columnNumbers(5, 1, 2, 2, 10, TextTransforms.Leading.NONE), "numbers with increase and repeat")

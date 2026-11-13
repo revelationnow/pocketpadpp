@@ -41,6 +41,8 @@ import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
+import io.github.revelationnow.pocketpadpp.core.Invisibles
+import io.github.revelationnow.pocketpadpp.core.SessionStore
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
@@ -79,6 +81,7 @@ class MainActivity : Activity() {
     private lateinit var palette: Palette
     private lateinit var themed: Context
     private val chromeBars = ArrayList<View>()
+    private val clipHistory = ArrayDeque<String>()
 
     // The on-screen Ctrl, Alt and Shift keys: SCMOD_* bits held for the next key only, and those locked on.
     private var armedModifiers = 0
@@ -139,6 +142,12 @@ class MainActivity : Activity() {
         editor.onCharAdded = { ch -> EditOps.autoIndent(editor, ch) }
         editor.onZoomChanged = { ThemeApplier.updateLineNumberWidth(editor, showLineNumbers) }
         editor.onShortcut = { key, modifiers -> shortcut(key, modifiers) }
+        editor.onCopied = { text ->
+            clipHistory.remove(text)
+            clipHistory.addFirst(text)
+            while (clipHistory.size > 20) clipHistory.removeLast()
+        }
+        Invisibles.apply(editor, prefs.getBoolean("showNpc", false), prefs.getBoolean("showControl", true))
         editor.onSoftModifiersUsed = { releaseModifiers() }
         editor.imeLog = { line -> onImeLog(line) }
         editor.requestFocus()
@@ -670,6 +679,21 @@ class MainActivity : Activity() {
             return
         }
         when (requestCode) {
+            REQUEST_LOAD_SESSION -> data.data?.let { uri ->
+                io.execute {
+                    val text = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
+                    ui.post { if (!destroyed) if (text == null) toast("Cannot read the session file") else loadSessionText(text) }
+                }
+            }
+
+            REQUEST_SAVE_SESSION -> data.data?.let { uri ->
+                val xml = workspace.exportSession()
+                io.execute {
+                    val ok = runCatching { FileIo.write(this, uri, xml.toByteArray(Charsets.UTF_8)) }.isSuccess
+                    ui.post { if (!destroyed) toast(if (ok) "Session saved" else "Cannot write the session file") }
+                }
+            }
+
             REQUEST_HASH -> {
                 val uris = ArrayList<Uri>()
                 data.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { uris += it } }
@@ -796,6 +820,10 @@ class MainActivity : Activity() {
         item("Close") { requestClose(workspace.active) }
         item("Close All") { closeMany(workspace.docs.toList()) }
         item("Open in Default Viewer", enabled = doc.uri != null) { viewInAnotherApp(doc, null) }
+        item("Rename...") { renameFile() }
+        item("Delete from Storage", enabled = doc.uri != null) { deleteFile() }
+        item("Load Session...") { pickFile(REQUEST_LOAD_SESSION) }
+        item("Save Session...") { createFile(REQUEST_SAVE_SESSION, "session.xml") }
         sub("Close Multiple Documents") {
             val index = workspace.docs.indexOf(doc)
             item("Close All but Active Document") { closeMany(workspace.docs.filter { it !== doc }) }
@@ -934,7 +962,15 @@ class MainActivity : Activity() {
             item("Open File") { openSelectedFile() }
             item("Search on Internet") { searchOnInternet() }
             item("Redact Selection") { if (!EditOps.redactSelection(editor)) toast("Select some text first") }
+            sub("Change Search Engine...") {
+                val current = prefs.getString("searchEngine", "") ?: ""
+                for ((name, template) in SEARCH_ENGINES) {
+                    item(name, checked = template == current) { prefs.edit().putString("searchEngine", template).apply() }
+                }
+            }
         }
+        item("Character Panel") { characterPanel() }
+        item("Clipboard History") { clipboardHistory() }
         item("Column Mode...") { columnModeTip() }
         item("Column Editor...") { columnEditor() }
         sub("Multi-select All") {
@@ -980,6 +1016,11 @@ class MainActivity : Activity() {
         item("Go to...") { goToLine() }
         item("Go to Matching Brace") { EditOps.goToMatchingBrace(editor) }
         item("Find characters in range...") { findCharsInRange() }
+        sub("Changed Lines") {
+            item("Go to Next Change") { if (!EditOps.goToChange(editor, forward = true)) toast("No changed lines") }
+            item("Go to Previous Change") { if (!EditOps.goToChange(editor, forward = false)) toast("No changed lines") }
+            item("Clear Change History") { EditOps.clearChangeHistory(editor) }
+        }
         item("Select All In-between {} [] or ()") {
             if (!EditOps.selectBetweenBraces(editor)) toast("Put the caret next to a brace first")
         }
@@ -1055,6 +1096,16 @@ class MainActivity : Activity() {
                 val on = !(whitespace && eol)
                 showWhitespace(on)
                 editor.send(Sci.SCI_SETVIEWEOL, if (on) 1 else 0)
+            }
+            val npc = prefs.getBoolean("showNpc", false)
+            val control = prefs.getBoolean("showControl", true)
+            item("Show Non-Printing Characters", checked = npc) {
+                prefs.edit().putBoolean("showNpc", !npc).apply()
+                Invisibles.apply(editor, !npc, control)
+            }
+            item("Show Control Characters & Unicode EOL", checked = control) {
+                prefs.edit().putBoolean("showControl", !control).apply()
+                Invisibles.apply(editor, npc, !control)
             }
             item("Show Indent Guide", checked = guides) { workspace.showIndentGuides = !guides }
             item("Show Wrap Symbol", checked = wrapSymbol) {
@@ -1254,6 +1305,8 @@ class MainActivity : Activity() {
     private fun searchOnInternet() {
         val query = EditOps.selectionOrWord(editor).trim()
         if (query.isEmpty()) return toast("Select some text first")
+        val template = prefs.getString("searchEngine", "") ?: ""
+        if (template.isNotEmpty()) return openLink(template.replace("%s", Uri.encode(query)))
         try {
             startActivity(Intent(Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, query))
         } catch (e: Exception) {
@@ -1588,6 +1641,123 @@ class MainActivity : Activity() {
 
     // endregion
 
+    /** Edit > Character Panel: the 256 single-byte characters with their codes; a tap inserts one. */
+    private fun characterPanel() = showMenu("Character Panel") {
+        val names = listOf(
+            "NUL", "SOH", "STX", "ETX", "EOT", "ENQ", "ACK", "BEL", "BS", "TAB", "LF", "VT", "FF", "CR", "SO", "SI", "DLE",
+            "DC1", "DC2", "DC3", "DC4", "NAK", "SYN", "ETB", "CAN", "EM", "SUB", "ESC", "FS", "GS", "RS", "US", "Space",
+        )
+        val latin = java.nio.charset.Charset.forName("windows-1252")
+        for (code in 0..255) {
+            val character = if (code < 128) code.toChar().toString() else String(byteArrayOf(code.toByte()), latin)
+            val shown = names.getOrNull(code) ?: if (code == 127) "DEL" else character
+            item("%3d   %02X   %s".format(code, code, shown)) { editor.typeText(character) }
+        }
+    }
+
+    /** Edit > Clipboard History: what was copied in this app lately; a tap pastes it. */
+    private fun clipboardHistory() = showMenu("Clipboard History") {
+        if (clipHistory.isEmpty()) item("Nothing has been copied here yet", enabled = false) {}
+        for (text in clipHistory.toList()) {
+            item(text.replace("\r\n", "\u23CE").replace('\n', '\u23CE').replace('\r', '\u23CE').take(60)) { editor.typeText(text) }
+        }
+    }
+
+    private fun pickFile(request: Int) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, request)
+        } catch (e: Exception) {
+            toast("No file picker is available on this device")
+        }
+    }
+
+    private fun createFile(request: Int, name: String) {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_TITLE, name)
+        }
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, request)
+        } catch (e: Exception) {
+            toast("No file picker is available on this device")
+        }
+    }
+
+    /** File > Load Session: opens the files a Notepad++-style session file lists. */
+    internal fun loadSessionText(xml: String) {
+        val uris = SessionStore.read(xml).entries.mapNotNull { entry -> entry.location?.let { Uri.parse(it) } }
+        if (uris.isEmpty()) toast("The session file lists no files") else openUris(uris)
+    }
+
+    /** File > Rename: a new name for the tab, and for the file in storage if there is one. */
+    private fun renameFile() {
+        val doc = workspace.active
+        val input = EditText(themed).apply {
+            contentDescription = "New name"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(doc.name)
+            selectAll()
+        }
+        val container = LinearLayout(themed).apply {
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        AlertDialog.Builder(themed)
+            .setTitle("Rename")
+            .setView(container)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val name = input.text.toString().trim()
+                val uri = doc.uri
+                if (name.isEmpty() || name == doc.name || doc !in workspace.docs) return@setPositiveButton
+                if (uri == null) return@setPositiveButton workspace.renamed(doc, null, name)
+                try {
+                    val renamed = if (uri.scheme == "file") {
+                        val from = java.io.File(uri.path ?: throw java.io.IOException("No path"))
+                        val to = java.io.File(from.parentFile, name)
+                        if (to.exists() || !from.renameTo(to)) throw java.io.IOException("the file could not be renamed")
+                        Uri.fromFile(to)
+                    } else {
+                        android.provider.DocumentsContract.renameDocument(contentResolver, uri, name)
+                            ?: throw java.io.IOException("the storage provider refused")
+                    }
+                    FileIo.persistAccess(this, renamed)
+                    workspace.renamed(doc, renamed, FileIo.displayName(this, renamed))
+                } catch (e: Exception) {
+                    toast("Cannot rename: ${e.message ?: e.javaClass.simpleName}")
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Notepad++'s Move to Recycle Bin. Android has no recycle bin, so this asks first and then deletes. */
+    private fun deleteFile() {
+        val doc = workspace.active
+        val uri = doc.uri ?: return
+        AlertDialog.Builder(themed)
+            .setTitle("Delete")
+            .setMessage("Delete the file \"${doc.name}\" from storage? This cannot be undone.")
+            .setPositiveButton("Delete") { _, _ ->
+                try {
+                    val deleted = if (uri.scheme == "file") java.io.File(uri.path ?: "").delete()
+                    else android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
+                    if (!deleted) throw java.io.IOException("the storage provider refused")
+                    if (doc in workspace.docs) workspace.close(doc)
+                } catch (e: Exception) {
+                    toast("Cannot delete: ${e.message ?: e.javaClass.simpleName}")
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun setTabColour(doc: Doc, colour: Int) {
         doc.colour = colour
         refreshTabs()
@@ -1743,6 +1913,18 @@ class MainActivity : Activity() {
         const val REQUEST_OPEN = 1
         const val REQUEST_SAVE_AS = 2
         const val REQUEST_HASH = 3
+        const val REQUEST_LOAD_SESSION = 4
+        const val REQUEST_SAVE_SESSION = 5
+
+        /** Edit > On Selection > Change Search Engine: an empty address means the device's own web search. */
+        val SEARCH_ENGINES = listOf(
+            "Device default" to "",
+            "DuckDuckGo" to "https://duckduckgo.com/?q=%s",
+            "Google" to "https://www.google.com/search?q=%s",
+            "Bing" to "https://www.bing.com/search?q=%s",
+            "Yahoo!" to "https://search.yahoo.com/search?q=%s",
+            "Stack Overflow" to "https://stackoverflow.com/search?q=%s",
+        )
         const val MAX_RECENT = 10
         const val DARK_THEME = "DarkModeDefault.xml"
         const val IME_LOG_LINES = 200

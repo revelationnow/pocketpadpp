@@ -91,6 +91,9 @@ class ScintillaView @JvmOverloads constructor(
      */
     var onShortcut: ((Int, Int) -> Boolean)? = null
 
+    /** Called with every text this editor puts on the clipboard, for the clipboard history. */
+    var onCopied: ((String) -> Unit)? = null
+
     /** Called when a pinch changed the zoom level, so that margins sized to the text can follow. */
     var onZoomChanged: (() -> Unit)? = null
 
@@ -1023,6 +1026,7 @@ class ScintillaView @JvmOverloads constructor(
 
     override fun setClipboard(text: String) {
         clipboard.setPrimaryClip(ClipData.newPlainText("Pocketpad++", text))
+        onCopied?.invoke(text)
     }
 
     override fun getClipboard(): String {
