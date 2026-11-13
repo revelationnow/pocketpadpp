@@ -42,7 +42,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 
 ## What works today
 
-298 of the 481 commands in Notepad++'s menus are implemented. In short:
+341 of the 481 commands in Notepad++'s menus are implemented. In short:
 
 **Editing**
 - Syntax highlighting and folding for 94 languages, with Notepad++'s keywords and file extensions
@@ -64,7 +64,10 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 **Search**
 - Find, find previous, count and replace above the keyboard
 - Match case, whole word, wrap around and regular expressions with groups
-- Find the selection or the word under the caret, go to line
+- Find the selection or the word under the caret, incremental search, go to line
+- Marks: highlight every occurrence in one of five colours, jump between them, copy them;
+  mark everything a search finds and bookmark those lines
+- Bookmarks, with cut, copy, replace and remove for all bookmarked lines at once
 
 **View**
 - Notepad++'s default theme, dark mode and 22 further themes; the app around the editor turns light or dark to match
@@ -121,7 +124,7 @@ The [feature map](docs/FEATURES.md) lists every Notepad++ command with its statu
 
 | Area | Planned |
 |---|---|
-| Search | Mark and styled tokens, incremental search, find in all open files and in folders with a results panel, Notepad++'s regular expression syntax |
+| Search | Find in all open files and in folders with a results panel, Notepad++'s regular expression syntax |
 | Panels | Document list, function list, document map, folder as workspace, split view, auto-completion |
 | Customisation | Preferences, style configurator, shortcut mapper, user-defined languages |
 | Tools | Macros, run commands, hashes, printing |
