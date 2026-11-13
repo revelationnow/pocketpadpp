@@ -173,7 +173,15 @@ class Workspace(
         return n
     }
 
-    private fun createDoc(): Doc = Doc(nextId++, editor.send(Sci.SCI_CREATEDOCUMENT), languages.normal).also { docs += it }
+    // Folds of the tab on screen, noted just before a document is created (see createDoc).
+    private var foldsBeforeCreate: List<Long>? = null
+
+    private fun createDoc(): Doc {
+        // SCI_CREATEDOCUMENT has a side effect: it resets the fold state of the view. Every new document is
+        // switched to straight away, so the tab being left only needs its folds noted before that happens.
+        foldsBeforeCreate = EditOps.foldedLines(editor)
+        return Doc(nextId++, editor.send(Sci.SCI_CREATEDOCUMENT), languages.normal).also { docs += it }
+    }
 
     fun newDocument(): Doc {
         val number = nextUntitledNumber()
@@ -199,7 +207,8 @@ class Workspace(
         doc.firstDocLine = editor.send(Sci.SCI_DOCLINEFROMVISIBLE, editor.send(Sci.SCI_GETFIRSTVISIBLELINE))
         doc.xOffset = editor.send(Sci.SCI_GETXOFFSET)
         // Which blocks are folded belongs to the view, not the document, so it is carried per tab by hand.
-        doc.folds = EditOps.foldedLines(editor)
+        doc.folds = foldsBeforeCreate ?: EditOps.foldedLines(editor)
+        foldsBeforeCreate = null
         doc.eolMode = editor.send(Sci.SCI_GETEOLMODE).toInt()
         doc.dirty = isDirty(doc)
         writeBackupIfNeeded(doc)

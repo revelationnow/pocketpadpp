@@ -925,27 +925,10 @@ class WalkthroughTest {
     fun foldsStayWithTheirTab() {
         setText("int main() {\n\tif (a) {\n\t\tb();\n\t}\n\treturn 0;\n}\n", "cpp")
         sci(Sci.SCI_COLOURISE, 0, -1)
-        fun probe(label: String) = Log.i(TAG, "fold probe $label: " + onUi { activity ->
-            val e = activity.editor
-            "visible2=${e.send(Sci.SCI_GETLINEVISIBLE, 2)} expanded1=${e.send(Sci.SCI_GETFOLDEXPANDED, 1)} " +
-                "level1=${e.send(Sci.SCI_GETFOLDLEVEL, 1).toString(16)} level2=${e.send(Sci.SCI_GETFOLDLEVEL, 2).toString(16)} " +
-                "endStyled=${e.send(Sci.SCI_GETENDSTYLED)} length=${e.send(Sci.SCI_GETLENGTH)} lexer=${e.send(Sci.SCI_GETLEXER)}"
-        })
-        probe("before fold")
         sci(Sci.SCI_FOLDLINE, 1, Sci.SC_FOLDACTION_CONTRACT.toLong())
         assertEquals(0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
-        for (wait in listOf(0L, 20L, 50L, 100L, 200L, 400L, 800L)) {
-            SystemClock.sleep(wait)
-            probe("after ${wait}ms more")
-        }
-        if (sci(Sci.SCI_GETLINEVISIBLE, 2) != 0L) {
-            // Folded straight after loading the text and lost again: try once more now that things have settled.
-            sci(Sci.SCI_FOLDLINE, 1, Sci.SC_FOLDACTION_CONTRACT.toLong())
-            SystemClock.sleep(1000)
-            probe("second fold, after 1000ms")
-        }
-        assertEquals("a fold made right after the text was loaded stays", 0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
         tap("New")
+        waitUntil("the new tab") { onUi { it.workspace.docs.size } == 2 }
         assertEquals("the fold is noted when its tab is left", listOf(1L), onUi { it.workspace.docs[0].folds })
         onUi { it.editor.typeText("other tab") }
 

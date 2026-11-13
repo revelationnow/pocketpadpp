@@ -490,6 +490,7 @@ private fun testMoreEditOps() {
     val firstDoc = sci.send(Sci.SCI_GETDOCPOINTER)
     sci.send(Sci.SCI_ADDREFDOCUMENT, 0, firstDoc)
     val secondDoc = sci.send(Sci.SCI_CREATEDOCUMENT)
+    eq(emptyList<Long>(), EditOps.foldedLines(sci), "creating a document already resets the view's folds, so they are noted first")
     sci.send(Sci.SCI_SETDOCPOINTER, 0, secondDoc)
     sci.send(Sci.SCI_SETDOCPOINTER, 0, firstDoc)
     eq(emptyList<Long>(), EditOps.foldedLines(sci), "switching documents forgets the folds")
