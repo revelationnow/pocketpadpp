@@ -184,6 +184,7 @@ class MainActivity : Activity() {
             setBackgroundColor(0xFFF4FFF4.toInt())
             setPadding(dp(6f), dp(2f), dp(6f), dp(2f))
             visibility = View.GONE
+            setOnClickListener { copyImeLog() }
         }
         root.addView(imeLogView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -487,9 +488,20 @@ class MainActivity : Activity() {
     }
 
     private fun onImeLog(line: String) {
-        imeLines.addLast(line)
-        while (imeLines.size > 6) imeLines.removeFirst()
-        if (imeLogView.visibility == View.VISIBLE) imeLogView.text = imeLines.joinToString("\n")
+        // Milliseconds within the last minute and a half are enough to see what belongs together.
+        imeLines.addLast("%05d %s".format(android.os.SystemClock.uptimeMillis() % 100000, line))
+        while (imeLines.size > IME_LOG_LINES) imeLines.removeFirst()
+        if (imeLogView.visibility == View.VISIBLE) showImeLog()
+    }
+
+    /** The log shows its newest lines; tapping it copies all that were kept. */
+    private fun showImeLog() {
+        imeLogView.text = (listOf("Keyboard log (tap to copy ${imeLines.size} lines)") + imeLines.toList().takeLast(6)).joinToString("\n")
+    }
+
+    private fun copyImeLog() {
+        editor.setClipboard(imeLines.joinToString("\n"))
+        toast("Keyboard log copied: ${imeLines.size} lines")
     }
 
     // endregion
@@ -1016,6 +1028,7 @@ class MainActivity : Activity() {
         item("Smaller text") { setFontSize(fontSize - 1) }
         item("Keyboard log", checked = imeLogView.visibility == View.VISIBLE) {
             imeLogView.visibility = if (imeLogView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            showImeLog()
         }
     }
 
@@ -1204,5 +1217,6 @@ class MainActivity : Activity() {
         const val REQUEST_SAVE_AS = 2
         const val MAX_RECENT = 10
         const val DARK_THEME = "DarkModeDefault.xml"
+        const val IME_LOG_LINES = 200
     }
 }

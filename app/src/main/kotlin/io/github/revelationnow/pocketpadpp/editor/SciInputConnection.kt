@@ -41,6 +41,49 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
         return true
     }
 
+    // Edits held back while Ctrl or Alt is held on screen (see hold).
+    private val heldEdits = ArrayList<() -> Unit>()
+    private val applyHeld = Runnable { flushHeld("no key followed") }
+
+    /**
+     * A keyboard typing over a selection may first move the caret and delete the selected text, and only then
+     * send the letter. With Ctrl or Alt held on screen that letter is a shortcut which needs the selection
+     * (copy, cut), so such preparations wait a moment: a key that follows cancels them, otherwise they go ahead.
+     * Returns true when the edit was held.
+     */
+    private fun hold(description: String, action: () -> Unit): Boolean {
+        if (!view.softShortcutHeld) return false
+        log("held: $description")
+        heldEdits += action
+        view.removeCallbacks(applyHeld)
+        view.postDelayed(applyHeld, HOLD_MS)
+        return true
+    }
+
+    private fun flushHeld(why: String) {
+        view.removeCallbacks(applyHeld)
+        if (heldEdits.isEmpty()) return
+        val edits = heldEdits.toList()
+        heldEdits.clear()
+        log("applying ${edits.size} held ($why)")
+        for (action in edits) action()
+    }
+
+    /** Text from the keyboard: a shortcut key when Ctrl or Alt is held on screen (true), otherwise an edit (false). */
+    private fun usedAsShortcut(text: CharSequence, composing: Boolean): Boolean {
+        if (!view.softShortcutHeld && heldEdits.isEmpty()) return false
+        if (view.typedWithSoftModifiers(text, composing)) {
+            view.removeCallbacks(applyHeld)
+            if (heldEdits.isNotEmpty()) log("dropped ${heldEdits.size} held (a shortcut key followed)")
+            heldEdits.clear()
+            // The keyboard's idea of the text may now differ from the document; make it read it again.
+            view.restartIme()
+            return true
+        }
+        flushHeld("ordinary typing")
+        return false
+    }
+
     override fun getEditable(): Editable = unused
 
     override fun beginBatchEdit(): Boolean {
@@ -90,7 +133,7 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
     }
 
     override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean =
-        if (view.typedWithSoftModifiers(text, composing = true)) true else edit("setComposingText(${quote(text)}, $newCursorPosition)") {
+        if (usedAsShortcut(text, composing = true)) true else edit("setComposingText(${quote(text)}, $newCursorPosition)") {
             ScintillaNative.imeSetComposingText(it, text.toString(), newCursorPosition)
         }
 
@@ -101,7 +144,7 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
         edit("finishComposingText()") { ScintillaNative.imeFinishComposing(it) }
 
     override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean =
-        if (view.typedWithSoftModifiers(text, composing = false)) true else edit("commitText(${quote(text)}, $newCursorPosition)") {
+        if (usedAsShortcut(text, composing = false)) true else edit("commitText(${quote(text)}, $newCursorPosition)") {
             ScintillaNative.imeCommitText(it, text.toString(), newCursorPosition)
         }
 
@@ -109,23 +152,32 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
 
     override fun commitCorrection(correctionInfo: CorrectionInfo?): Boolean = true
 
-    override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean =
-        edit("deleteSurroundingText($beforeLength, $afterLength)") {
-            ScintillaNative.imeDeleteSurrounding(it, beforeLength, afterLength)
-        }
+    override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+        val description = "deleteSurroundingText($beforeLength, $afterLength)"
+        val delete = { edit(description) { ScintillaNative.imeDeleteSurrounding(it, beforeLength, afterLength) } }
+        return hold(description) { delete() } || delete()
+    }
 
-    override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean =
-        edit("deleteSurroundingTextInCodePoints($beforeLength, $afterLength)") {
-            // Convert code points to UTF-16 units using the text actually around the caret.
-            val before = ScintillaNative.imeTextBefore(it, beforeLength * 2)
-            val after = ScintillaNative.imeTextAfter(it, afterLength * 2)
-            val beforeUnits = before.length - before.offsetByCodePoints(before.length, -minOf(beforeLength, before.codePointCount(0, before.length)))
-            val afterUnits = after.offsetByCodePoints(0, minOf(afterLength, after.codePointCount(0, after.length)))
-            ScintillaNative.imeDeleteSurrounding(it, beforeUnits, afterUnits)
+    override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+        val description = "deleteSurroundingTextInCodePoints($beforeLength, $afterLength)"
+        val delete = {
+            edit(description) {
+                // Convert code points to UTF-16 units using the text actually around the caret.
+                val before = ScintillaNative.imeTextBefore(it, beforeLength * 2)
+                val after = ScintillaNative.imeTextAfter(it, afterLength * 2)
+                val beforeUnits = before.length - before.offsetByCodePoints(before.length, -minOf(beforeLength, before.codePointCount(0, before.length)))
+                val afterUnits = after.offsetByCodePoints(0, minOf(afterLength, after.codePointCount(0, after.length)))
+                ScintillaNative.imeDeleteSurrounding(it, beforeUnits, afterUnits)
+            }
         }
+        return hold(description) { delete() } || delete()
+    }
 
-    override fun setSelection(start: Int, end: Int): Boolean =
-        edit("setSelection($start, $end)") { ScintillaNative.imeSetSelection(it, start, end) }
+    override fun setSelection(start: Int, end: Int): Boolean {
+        val description = "setSelection($start, $end)"
+        val select = { edit(description) { ScintillaNative.imeSetSelection(it, start, end) } }
+        return hold(description) { select() } || select()
+    }
 
     override fun performContextMenuAction(id: Int): Boolean {
         log("performContextMenuAction($id)")
@@ -148,7 +200,15 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
     override fun sendKeyEvent(event: KeyEvent): Boolean {
         // Handled at once rather than queued, so key events stay in order with the text edits around them.
         if (event.action == KeyEvent.ACTION_DOWN) {
-            log("sendKeyEvent(${KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_")})")
+            val description = "sendKeyEvent(${KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_")})"
+            if (event.keyCode == KeyEvent.KEYCODE_DEL && hold(description) {
+                    log(description)
+                    view.handleKey(event)
+                    view.syncIme()
+                }
+            ) return true
+            if (event.keyCode != KeyEvent.KEYCODE_DEL) flushHeld("another key")
+            log(description)
             if (!view.handleKey(event)) return super.sendKeyEvent(event)
             view.syncIme()
         }
@@ -164,5 +224,6 @@ internal class SciInputConnection(private val view: ScintillaView) : BaseInputCo
 
     private companion object {
         const val EXTRACT_WINDOW = 2048
+        const val HOLD_MS = 150L
     }
 }

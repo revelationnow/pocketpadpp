@@ -210,6 +210,11 @@ class ScintillaView @JvmOverloads constructor(
         if (ptr != 0L) ScintillaNative.insertText(ptr, text)
     }
 
+    /** True while the on-screen Ctrl or Alt key is held, which turns the next key into a shortcut. */
+    internal val softShortcutHeld: Boolean get() = softModifiers and (Sci.SCMOD_CTRL or Sci.SCMOD_ALT) != 0
+
+    internal fun restartIme() = imm.restartInput(this)
+
     /** A key with modifiers: the application's shortcuts get it first, then Scintilla's own key map. */
     fun shortcutKey(key: Int, modifiers: Int): Boolean {
         if (ptr == 0L) return false
@@ -227,6 +232,7 @@ class ScintillaView @JvmOverloads constructor(
         var typed: Char? = null
         if (modifiers and (Sci.SCMOD_CTRL or Sci.SCMOD_ALT) != 0) {
             if (text.isEmpty() && hasSelection()) {
+                imeLog?.invoke("ignored empty ${if (composing) "composing" else "committed"} text: modifier held over a selection")
                 // Some keyboards clear the selection before sending the key typed over it. With Ctrl or Alt
                 // held the key is a shortcut that needs that selection (copy, cut), so it is left alone.
                 return true
@@ -251,6 +257,11 @@ class ScintillaView @JvmOverloads constructor(
             }
         }
         if (typed == null) {
+            if (softShortcutHeld) {
+                ScintillaNative.imeState(ptr, imeState)
+                imeLog?.invoke("modifier held but no key found in ${if (composing) "composing" else "committed"} text of ${text.length}; " +
+                    "selection ${imeState[0]}-${imeState[1]}, composing ${imeState[2]}-${imeState[3]}")
+            }
             // Shift alone, or text that is not a single key press: ordinary typing, which still uses up a one-shot key.
             if (!composing) onSoftModifiersUsed?.invoke()
             return false
@@ -258,6 +269,7 @@ class ScintillaView @JvmOverloads constructor(
         // The word being composed stays as it is; the shortcut must not act on a half-finished composition.
         if (composing) ScintillaNative.imeFinishComposing(ptr)
         val ch: Char = typed
+        imeLog?.invoke("shortcut key '$ch' with modifiers $modifiers, from ${if (composing) "composing" else "committed"} text of ${text.length}")
         val key = when {
             ch.isLetter() -> ch.uppercaseChar().code
             ch == '+' || ch == '=' -> Sci.SCK_ADD

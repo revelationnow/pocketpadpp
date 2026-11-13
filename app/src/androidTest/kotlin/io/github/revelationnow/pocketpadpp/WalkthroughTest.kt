@@ -1155,6 +1155,57 @@ class WalkthroughTest {
         assertEquals("alpha ", text())
         assertEquals(0, held())
 
+        // Other keyboards move the caret and delete the selected text step by step before sending the letter.
+        setText("alpha beta")
+        sci(Sci.SCI_SETSEL, 6, 10)
+        onUi { it.editor.setClipboard("") }
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val keyboard = it.editor.onCreateInputConnection(EditorInfo())!!
+            keyboard.beginBatchEdit()
+            keyboard.setSelection(10, 10)
+            keyboard.deleteSurroundingText(4, 0)
+            keyboard.setComposingText("c", 1)
+            keyboard.endBatchEdit()
+        }
+        assertEquals("Ctrl+C when the keyboard deletes the selection step by step", "beta", clipboard())
+        assertEquals("alpha beta" to "6-10", text() to selection())
+
+        sci(Sci.SCI_SETSEL, 0, 5)
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val keyboard = it.editor.onCreateInputConnection(EditorInfo())!!
+            keyboard.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+            keyboard.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+            keyboard.commitText("c", 1)
+        }
+        assertEquals("Ctrl+C when the keyboard sends a backspace first", "alpha", clipboard())
+        assertEquals("alpha beta", text())
+        SystemClock.sleep(700)
+        assertEquals("nothing is deleted afterwards either", "alpha beta", text())
+
+        // With Ctrl locked and no key following, a deletion still goes through after the short wait.
+        sci(Sci.SCI_GOTOPOS, 10)
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        tap("Ctrl")
+        onUi { it.editor.onCreateInputConnection(EditorInfo())!!.deleteSurroundingText(1, 0) }
+        SystemClock.sleep(600)
+        assertEquals("a lone delete is only delayed, not lost", "alpha bet", text())
+        tap("Ctrl")
+        assertEquals(0, held())
+
+        // The keyboard log can be copied for a bug report.
+        openMenu("Settings", "Keyboard log")
+        tapDescribed("Close menu")
+        onUi { it.editor.onCreateInputConnection(EditorInfo())!!.commitText("z", 1) }
+        device.wait(Until.findObject(By.text(Pattern.compile("Keyboard log \\(tap to copy.*", Pattern.DOTALL))), 4000)!!.click()
+        waitUntil("the log to reach the clipboard") { clipboard().contains("commitText(\"z\", 1)") }
+        assertTrue("the log includes the shortcut handling", clipboard().contains("shortcut key 'c'"))
+        shot("keyboard-log")
+
         // A hardware keyboard goes through the same table.
         val now = SystemClock.uptimeMillis()
         val meta = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
