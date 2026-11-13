@@ -1402,9 +1402,13 @@ class WalkthroughTest {
         tapDescribed("Close menu")
         assertTrue("the toolbar is hidden in distraction free mode", gone("Save"))
         shot("distraction-free")
-        // Back closes the keyboard first if it is showing, then leaves the mode.
-        device.pressBack()
-        if (!onScreen("Save", 1500)) device.pressBack()
+        // Back closes the keyboard first if it is showing, then leaves the mode. The first time a device goes
+        // full screen, Android also explains how to get out, and that notice has to be acknowledged.
+        for (attempt in 1..4) {
+            device.wait(Until.findObject(By.text("Got it")), 1000)?.click()
+            if (onScreen("Save", 800)) break
+            device.pressBack()
+        }
         assertTrue("Back brings the bars back", onScreen("Save"))
 
         // Window: sorting and the list of open documents; tab colours and numbered tabs.
