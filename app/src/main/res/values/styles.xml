@@ -5,4 +5,11 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:colorAccent">#2A7BDE</item>
     </style>
+
+    <!-- Used when the chosen Notepad++ theme has a dark background. -->
+    <style name="AppTheme.Dark" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#2B2B2B</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">#5AA2F0</item>
+    </style>
 </resources>

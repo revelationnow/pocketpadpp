@@ -27,6 +27,7 @@ import io.github.revelationnow.pocketpadpp.app.FileIo
 import io.github.revelationnow.pocketpadpp.app.FindBar
 import io.github.revelationnow.pocketpadpp.app.LoadedFile
 import io.github.revelationnow.pocketpadpp.app.MenuSheet
+import io.github.revelationnow.pocketpadpp.app.Palette
 import io.github.revelationnow.pocketpadpp.app.MenuSpec
 import io.github.revelationnow.pocketpadpp.app.TabStrip
 import io.github.revelationnow.pocketpadpp.app.Workspace
@@ -67,6 +68,9 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("settings", Context.MODE_PRIVATE) }
     private val imeLines = ArrayDeque<String>()
 
+    private lateinit var palette: Palette
+    private lateinit var root: LinearLayout
+    private var themeName = ""
     private var fontSize = 13
     private var showLineNumbers = true
     private var shownDirty = false
@@ -85,20 +89,26 @@ class MainActivity : Activity() {
     // region Set-up
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The bars and dialogs around the editor are light or dark to match the Notepad++ theme in use,
+        // which has to be settled before the window is created.
+        themeName = prefs.getString("theme", "") ?: ""
+        val theme = loadTheme(themeName)
+        palette = Palette(theme.isDark)
+        setTheme(if (palette.dark) R.style.AppTheme_Dark else R.style.AppTheme)
         super.onCreate(savedInstanceState)
         fontSize = prefs.getInt("fontSize", 13)
         showLineNumbers = prefs.getBoolean("lineNumbers", true)
 
-        val root = LinearLayout(this).apply {
+        root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
-            setBackgroundColor(Color.WHITE)
+            setBackgroundColor(theme.background or 0xFF000000.toInt())
         }
 
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(CHROME)
+            setBackgroundColor(palette.chrome)
         }
         fun tool(label: String, description: String, action: (View) -> Unit): Button = barButton(label, description, action).also {
             toolbar.addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
@@ -112,7 +122,7 @@ class MainActivity : Activity() {
         moreButton = tool("⋮", "Menu") { showMainMenu() }
         root.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)))
 
-        tabs = TabStrip(this)
+        tabs = TabStrip(this, palette)
         root.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38f)))
 
         editor = ScintillaView(this)
@@ -128,7 +138,7 @@ class MainActivity : Activity() {
         }
         root.addView(imeLogView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        findBar = FindBar(this, editor)
+        findBar = FindBar(this, editor, palette)
         findBar.onClose = { editor.requestFocus() }
         root.addView(findBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -136,8 +146,8 @@ class MainActivity : Activity() {
         root.addView(statusBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         setContentView(root)
         // The strip behind the system's navigation bar matches the status bar above it.
-        window.navigationBarColor = CHROME
-        if (Build.VERSION.SDK_INT >= 27) {
+        window.navigationBarColor = palette.chrome
+        if (Build.VERSION.SDK_INT >= 27 && !palette.dark) {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         }
@@ -146,7 +156,6 @@ class MainActivity : Activity() {
         val languages = assets.open("npp/languages.tsv").use { table ->
             assets.open("npp/langs.model.xml").use { xml -> LanguageRegistry.load(table, xml) }
         }
-        val theme = assets.open("npp/stylers.model.xml").use { NppTheme.load(it) }
 
         editor.send(Sci.SCI_SETTABWIDTH, 4)
         editor.send(Sci.SCI_SETWRAPMODE, (if (prefs.getBoolean("wrap", false)) Sci.SC_WRAP_WORD else Sci.SC_WRAP_NONE).toLong())
@@ -166,6 +175,7 @@ class MainActivity : Activity() {
         editor.onStateChanged = { onEditorStateChanged() }
         editor.onTextChanged = { workspace.textChanged() }
         editor.onCharAdded = { ch -> EditOps.autoIndent(editor, ch) }
+        editor.onZoomChanged = { ThemeApplier.updateLineNumberWidth(editor, showLineNumbers) }
         editor.imeLog = { line -> onImeLog(line) }
         editor.requestFocus()
         refreshTabs()
@@ -247,7 +257,7 @@ class MainActivity : Activity() {
         }
         return HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
-            setBackgroundColor(0xFFF7F7F7.toInt())
+            setBackgroundColor(palette.keysBack)
             addView(row, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
     }
@@ -257,11 +267,11 @@ class MainActivity : Activity() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(CHROME)
+            setBackgroundColor(palette.chrome)
         }
         statusText = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setTextColor(0xFF404040.toInt())
+            setTextColor(palette.chromeDimText)
             setPadding(dp(8f), dp(4f), dp(4f), dp(4f))
             maxLines = 1
             // Notepad++ opens Go to from a double click on this part of the status bar.
@@ -270,7 +280,7 @@ class MainActivity : Activity() {
         bar.addView(statusText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         fun chip(action: (View) -> Unit) = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setTextColor(0xFF202020.toInt())
+            setTextColor(palette.chromeText)
             setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
             maxLines = 1
             setOnClickListener(action)
@@ -536,7 +546,7 @@ class MainActivity : Activity() {
 
     private fun showMenu(title: String, build: MenuSpec.() -> Unit) {
         menuSheet?.dismiss()
-        menuSheet = MenuSheet(this).also { sheet ->
+        menuSheet = MenuSheet(this, palette.dark).also { sheet ->
             sheet.onAction = { updateStatus() }
             sheet.show(title, build)
         }
@@ -821,6 +831,14 @@ class MainActivity : Activity() {
 
     private fun MenuSpec.settingsMenu() {
         val textMode = editor.keyboardMode == ScintillaView.KeyboardMode.TEXT
+        // Notepad++'s dark mode is its DarkModeDefault theme; the other themes are under Theme.
+        item("Dark mode", checked = palette.dark) { chooseTheme(if (palette.dark) "" else DARK_THEME) }
+        sub("Theme") {
+            item("Default (stylers.xml)", checked = themeName.isEmpty()) { chooseTheme("") }
+            for (file in themeFiles()) {
+                item(file.removeSuffix(".xml"), checked = file == themeName) { chooseTheme(file) }
+            }
+        }
         item("Keyboard suggestions and autocorrect", checked = textMode) {
             editor.keyboardMode = if (textMode) ScintillaView.KeyboardMode.CODE else ScintillaView.KeyboardMode.TEXT
             prefs.edit().putBoolean("textKeyboard", !textMode).apply()
@@ -834,6 +852,38 @@ class MainActivity : Activity() {
         item("Smaller text") { setFontSize(fontSize - 1) }
         item("Keyboard log", checked = imeLogView.visibility == View.VISIBLE) {
             imeLogView.visibility = if (imeLogView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun themeFiles(): List<String> =
+        (assets.list("npp/themes") ?: emptyArray()).filter { it.endsWith(".xml") }.sortedBy { it.lowercase() }
+
+    /** Reads a Notepad++ theme shipped with the app; an empty or unreadable name gives the default one. */
+    private fun loadTheme(name: String): NppTheme {
+        if (name.isNotEmpty()) {
+            try {
+                return assets.open("npp/themes/$name").use { NppTheme.load(it) }
+            } catch (e: Exception) {
+                // Fall through to the default theme.
+            }
+        }
+        return assets.open("npp/stylers.model.xml").use { NppTheme.load(it) }
+    }
+
+    private fun chooseTheme(name: String) {
+        if (name == themeName) return
+        val theme = loadTheme(name)
+        themeName = name
+        prefs.edit().putString("theme", name).apply()
+        if (theme.isDark != palette.dark) {
+            // Bars, menus and dialogs take their colours from the window's theme, which is fixed once the
+            // window exists, so going between light and dark rebuilds the screen. Tabs and unsaved text
+            // come back through the session snapshot.
+            menuSheet?.dismiss()
+            recreate()
+        } else {
+            workspace.theme = theme
+            root.setBackgroundColor(theme.background or 0xFF000000.toInt())
         }
     }
 
@@ -988,6 +1038,6 @@ class MainActivity : Activity() {
         const val REQUEST_OPEN = 1
         const val REQUEST_SAVE_AS = 2
         const val MAX_RECENT = 10
-        const val CHROME = 0xFFEFEFEF.toInt()
+        const val DARK_THEME = "DarkModeDefault.xml"
     }
 }

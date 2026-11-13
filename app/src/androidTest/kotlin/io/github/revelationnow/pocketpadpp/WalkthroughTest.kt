@@ -236,6 +236,44 @@ class WalkthroughTest {
         touch(MotionEvent.ACTION_UP, toX, toY, down, SystemClock.uptimeMillis())
     }
 
+    /** Two fingers on one row, moving apart or together around a centre point. */
+    private fun pinch(centreX: Float, centreY: Float, startSpan: Float, endSpan: Float, steps: Int = 12) {
+        val properties = Array(2) { index ->
+            MotionEvent.PointerProperties().apply {
+                id = index
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+        }
+        val down = SystemClock.uptimeMillis()
+        fun send(action: Int, pointers: Int, span: Float) {
+            val coords = Array(2) { index ->
+                MotionEvent.PointerCoords().apply {
+                    x = centreX + (if (index == 0) -span else span) / 2
+                    y = centreY
+                    pressure = 1f
+                    size = 1f
+                }
+            }
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, pointers, properties, coords,
+                0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            instrumentation.sendPointerSync(event)
+            event.recycle()
+        }
+        val second = 1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT
+        send(MotionEvent.ACTION_DOWN, 1, startSpan)
+        send(MotionEvent.ACTION_POINTER_DOWN or second, 2, startSpan)
+        for (i in 1..steps) {
+            SystemClock.sleep(20)
+            send(MotionEvent.ACTION_MOVE, 2, startSpan + (endSpan - startSpan) * i / steps)
+        }
+        send(MotionEvent.ACTION_POINTER_UP or second, 2, endSpan)
+        send(MotionEvent.ACTION_UP, 1, endSpan)
+    }
+
+    /** Brightness of a Scintilla colour (0xBBGGRR), 0 to 255. */
+    private fun brightness(colour: Long): Double =
+        0.299 * (colour and 0xFF) + 0.587 * ((colour shr 8) and 0xFF) + 0.114 * ((colour shr 16) and 0xFF)
+
     /** Counts pixels inside the editor whose colour is close to the given 0xRRGGBB. */
     private fun countPixels(rgb: Int, tolerance: Int = 40): Int {
         device.waitForIdle()
@@ -785,6 +823,116 @@ class WalkthroughTest {
         tapButton("No")
         assertEquals("closing the last tab leaves one empty tab", listOf("new 1"), names())
         assertEquals("", text())
+    }
+
+    @Test
+    fun themesAndDarkMode() {
+        fun background() = sci(Sci.SCI_STYLEGETBACK, Sci.STYLE_DEFAULT.toLong())
+        val code = "#include <vector>\n// comment\nint main() {\n\tconst char *s = \"text\";\n\treturn 42;\n}\n"
+        val file = File(context.cacheDir, "theme.cpp").apply { writeText(code) }
+        onUi { it.openUris(listOf(Uri.fromFile(file))) }
+        waitUntil("the file to open") { onUi { it.workspace.active.name } == "theme.cpp" }
+        tap("New")
+        onUi { it.editor.typeText("unsaved words") }
+        assertEquals("the default theme is white", 0xFFFFFFL, background())
+
+        // Dark mode rebuilds the screen; tabs and unsaved text come back.
+        openMenu("Settings", "Dark mode")
+        waitUntil("the screen to come back dark") { onUi { it.workspace.docs.size } == 2 && brightness(background()) < 128 }
+        assertEquals("unsaved text survives the switch", "unsaved words", text())
+        shot("dark-mode")
+        tapDescribed("Menu")
+        menu("Settings")
+        shot("dark-mode-menu")
+        tapDescribed("Close menu")
+        tap("theme.cpp")
+        assertEquals(code, text())
+        sci(Sci.SCI_COLOURISE, 0, -1)
+        shot("dark-mode-code")
+        tap("Find")
+        shot("dark-mode-find")
+        tapDescribed("Close")
+
+        // Another dark theme applies on the spot.
+        val darkDefault = background()
+        openMenu("Settings", "Theme", "Monokai")
+        assertTrue("Monokai has its own dark background", background() != darkDefault && brightness(background()) < 128)
+        tapDescribed("Close menu")
+        shot("theme-monokai")
+
+        // A light theme rebuilds the screen again.
+        openMenu("Settings", "Theme", "Solarized-light")
+        waitUntil("the screen to come back light") { onUi { it.workspace.docs.size } == 2 && brightness(background()) > 128 }
+        sci(Sci.SCI_COLOURISE, 0, -1)
+        shot("theme-solarized-light")
+
+        // The choice is remembered.
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        waitUntil("the session to be restored") { onUi { it.workspace.docs.size } == 2 }
+        assertTrue("the theme is remembered", background() != 0xFFFFFFL && brightness(background()) > 128)
+        openMenu("Settings", "Theme", "Default (stylers.xml)")
+        assertEquals("back to the default theme", 0xFFFFFFL, background())
+        tapDescribed("Close menu")
+    }
+
+    @Test
+    fun pinchZoomAndScrollThumb() {
+        setText((1..2000).joinToString("\n") { "line $it" })
+        val bounds = editorBounds()
+        val centreX = bounds.exactCenterX()
+        val centreY = bounds.top + bounds.height() * 0.4f
+
+        pinch(centreX, centreY, 200f, 400f)
+        val zoomed = sci(Sci.SCI_GETZOOM)
+        assertTrue("spreading two fingers enlarges the text (zoom $zoomed)", zoomed >= 8)
+        assertEquals("a pinch does not move the caret or select anything", "0-0", selection())
+        shot("pinch-zoomed-in")
+        pinch(centreX, centreY, 400f, 200f)
+        assertTrue("pinching back restores the size (zoom ${sci(Sci.SCI_GETZOOM)})", kotlin.math.abs(sci(Sci.SCI_GETZOOM)) <= 1)
+        sci(Sci.SCI_SETZOOM, 0)
+
+        // A short scroll brings out the thumb at the right edge; dragging it goes through the whole file.
+        drag(centreX, bounds.bottom - 150f, centreX, bounds.top + 150f)
+        val edge = bounds.right - 12f
+        var down = SystemClock.uptimeMillis()
+        touch(MotionEvent.ACTION_DOWN, edge, bounds.top + 70f, down, down)
+        for (i in 1..20) {
+            SystemClock.sleep(16)
+            touch(MotionEvent.ACTION_MOVE, edge, bounds.top + 70f + (bounds.height() / 2f - 70f) * i / 20, down, SystemClock.uptimeMillis())
+        }
+        val middle = sci(Sci.SCI_GETFIRSTVISIBLELINE)
+        shot("scroll-thumb-held")
+        assertTrue("half way down the track is around the middle of the file (line $middle)", middle in 700..1300)
+        for (i in 1..20) {
+            SystemClock.sleep(16)
+            touch(MotionEvent.ACTION_MOVE, edge, bounds.exactCenterY() + (bounds.height() / 2f - 5f) * i / 20, down, SystemClock.uptimeMillis())
+        }
+        touch(MotionEvent.ACTION_UP, edge, bounds.bottom - 5f, down, SystemClock.uptimeMillis())
+        assertTrue("the bottom of the track is the end of the file (line ${sci(Sci.SCI_GETFIRSTVISIBLELINE)})",
+            sci(Sci.SCI_GETFIRSTVISIBLELINE) > 1900)
+        down = SystemClock.uptimeMillis()
+        touch(MotionEvent.ACTION_DOWN, edge, bounds.bottom - 60f, down, down)
+        for (i in 1..20) {
+            SystemClock.sleep(16)
+            touch(MotionEvent.ACTION_MOVE, edge, bounds.bottom - 60f - (bounds.height() - 60f) * i / 20, down, SystemClock.uptimeMillis())
+        }
+        touch(MotionEvent.ACTION_UP, edge, bounds.top.toFloat(), down, SystemClock.uptimeMillis())
+        assertEquals("and the top of the track is the start", 0L, sci(Sci.SCI_GETFIRSTVISIBLELINE))
+    }
+
+    @Test
+    fun foldsStayWithTheirTab() {
+        setText("int main() {\n\tif (a) {\n\t\tb();\n\t}\n\treturn 0;\n}\n", "cpp")
+        sci(Sci.SCI_COLOURISE, 0, -1)
+        sci(Sci.SCI_FOLDLINE, 1, Sci.SC_FOLDACTION_CONTRACT.toLong())
+        assertEquals(0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+        tap("New")
+        onUi { it.editor.typeText("other tab") }
+        tap("new 1")
+        assertEquals("the fold is still there after visiting another tab", 0L, sci(Sci.SCI_GETLINEVISIBLE, 2))
+        assertEquals("and only that block is folded", 1L, sci(Sci.SCI_GETLINEVISIBLE, 4))
+        shot("fold-kept-per-tab")
     }
 
     private companion object {

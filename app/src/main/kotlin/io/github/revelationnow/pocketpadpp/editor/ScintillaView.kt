@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
@@ -75,6 +76,9 @@ class ScintillaView @JvmOverloads constructor(
      */
     var onCharAdded: ((Int) -> Unit)? = null
 
+    /** Called when a pinch changed the zoom level, so that margins sized to the text can follow. */
+    var onZoomChanged: (() -> Unit)? = null
+
     /** Receives one line per soft keyboard request, for diagnosing keyboard behaviour. */
     var imeLog: ((String) -> Unit)? = null
 
@@ -98,7 +102,7 @@ class ScintillaView @JvmOverloads constructor(
     private var lastScrollTime = 0L
 
     // Touch state
-    private enum class Touch { NONE, PENDING, SCROLL, HANDLE, SELECT_DRAG }
+    private enum class Touch { NONE, PENDING, SCROLL, HANDLE, SELECT_DRAG, THUMB, ZOOM }
 
     private var touch = Touch.NONE
     private var downX = 0f
@@ -117,7 +121,12 @@ class ScintillaView @JvmOverloads constructor(
     private val handleRadius = 11f * density
     private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2A7BDE.toInt() }
     private val handlePath = Path()
-    private val scrollBarPaint = Paint().apply { color = 0x66000000 }
+    // A mid grey shows on light and dark themes alike.
+    private val scrollBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x99808080.toInt() }
+    private val thumbRect = RectF()
+    private var thumbGrabOffset = 0f
+    private var pinchStartSpan = 0f
+    private var pinchStartSize = 0L
     private val edgeZone = 48f * density
 
     private var actionMode: ActionMode? = null
@@ -307,15 +316,74 @@ class ScintillaView @JvmOverloads constructor(
         }
     }
 
-    private fun drawScrollBar(canvas: Canvas) {
-        if (android.os.SystemClock.uptimeMillis() - lastScrollTime > 1200) return
+    /**
+     * Works out where the scroll indicator is. In long documents it is a thumb wide enough to drag,
+     * which is the quick way to get around a big file on a touch screen.
+     * Returns false when there is nothing to scroll or the indicator has faded.
+     */
+    private fun layoutThumb(): Boolean {
+        if (touch != Touch.THUMB && android.os.SystemClock.uptimeMillis() - lastScrollTime > SCROLL_BAR_MS) return false
         val maxY = maxScrollY()
-        if (maxY <= 0) return
-        val barWidth = 4f * density
-        val barHeight = max(32f * density, height.toFloat() * height / (maxY + height))
+        if (maxY <= 0) return false
+        val draggable = maxY > height * 2L
+        val barWidth = (if (draggable) 14f else 4f) * density
+        val barHeight = max((if (draggable) 52f else 32f) * density, height.toFloat() * height / (maxY + height))
         val top = (height - barHeight) * scrollYPixels() / maxY
-        canvas.drawRect(width - barWidth, top, width.toFloat(), top + barHeight, scrollBarPaint)
-        postInvalidateDelayed(1300)
+        thumbRect.set(width - barWidth, top, width.toFloat(), top + barHeight)
+        return true
+    }
+
+    private fun thumbIsDraggable() = maxScrollY() > height * 2L
+
+    private fun drawScrollBar(canvas: Canvas) {
+        if (!layoutThumb()) return
+        val radius = if (thumbIsDraggable()) 5f * density else 0f
+        canvas.drawRoundRect(thumbRect, radius, radius, scrollBarPaint)
+        postInvalidateDelayed(SCROLL_BAR_MS + 100)
+    }
+
+    private fun tryGrabThumb(x: Float, y: Float): Boolean {
+        if (!thumbIsDraggable() || !layoutThumb()) return false
+        val reach = 14f * density
+        if (x < thumbRect.left - reach * 1.5f || y < thumbRect.top - reach || y > thumbRect.bottom + reach) return false
+        thumbGrabOffset = (y - thumbRect.top).coerceIn(0f, thumbRect.height())
+        return true
+    }
+
+    private fun dragThumbTo(y: Float) {
+        val track = height - thumbRect.height()
+        if (track <= 0f) return
+        val fraction = ((y - thumbGrabOffset) / track).coerceIn(0f, 1f)
+        scrollTextYTo((fraction.toDouble() * maxScrollY()).toLong())
+    }
+
+    // endregion
+
+    // region Pinch zoom
+
+    private fun pinchSpan(event: MotionEvent): Float =
+        kotlin.math.hypot(event.getX(0) - event.getX(1), event.getY(0) - event.getY(1))
+
+    private fun startPinch(event: MotionEvent) {
+        handler.removeCallbacks(longPress)
+        handler.removeCallbacks(edgeScroll)
+        scroller.forceFinished(true)
+        touch = Touch.ZOOM
+        pinchStartSpan = pinchSpan(event).coerceAtLeast(1f)
+        pinchStartSize = send(Sci.SCI_STYLEGETSIZE, Sci.STYLE_DEFAULT.toLong()) + send(Sci.SCI_GETZOOM)
+    }
+
+    /** Text size follows the distance between the two fingers, within Notepad++'s zoom range. */
+    private fun pinchTo(event: MotionEvent) {
+        if (event.pointerCount < 2) return
+        val base = send(Sci.SCI_STYLEGETSIZE, Sci.STYLE_DEFAULT.toLong())
+        val size = (pinchStartSize * pinchSpan(event) / pinchStartSpan).roundToInt().toLong()
+        val zoom = (size - base).coerceIn(max(-10L, 4L - base), 20L)
+        if (zoom != send(Sci.SCI_GETZOOM)) {
+            send(Sci.SCI_SETZOOM, zoom)
+            onZoomChanged?.invoke()
+            invalidate()
+        }
     }
 
     // endregion
@@ -488,7 +556,10 @@ class ScintillaView @JvmOverloads constructor(
                 velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
                 downX = x; downY = y; lastX = x; lastY = y
                 downTime = event.eventTime
-                if (tryGrabHandle(x, y)) {
+                if (tryGrabThumb(x, y)) {
+                    touch = Touch.THUMB
+                    actionMode?.finish()
+                } else if (tryGrabHandle(x, y)) {
                     touch = Touch.HANDLE
                     actionMode?.finish()
                 } else {
@@ -497,9 +568,16 @@ class ScintillaView @JvmOverloads constructor(
                 }
             }
 
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger turns whatever was starting into a pinch, unless a handle is being dragged.
+                if (event.pointerCount == 2 && (touch == Touch.PENDING || touch == Touch.SCROLL)) startPinch(event)
+            }
+
             MotionEvent.ACTION_MOVE -> {
                 velocityTracker?.addMovement(event)
                 when (touch) {
+                    Touch.THUMB -> dragThumbTo(y)
+                    Touch.ZOOM -> pinchTo(event)
                     Touch.PENDING -> if (abs(x - downX) > touchSlop || abs(y - downY) > touchSlop) {
                         handler.removeCallbacks(longPress)
                         touch = Touch.SCROLL
@@ -528,7 +606,8 @@ class ScintillaView @JvmOverloads constructor(
                     Touch.PENDING -> tap(x, y, event.eventTime)
                     Touch.SCROLL -> fling()
                     Touch.HANDLE, Touch.SELECT_DRAG -> if (hasSelection()) showActionMode()
-                    Touch.NONE -> {}
+                    Touch.THUMB -> lastScrollTime = android.os.SystemClock.uptimeMillis()
+                    Touch.ZOOM, Touch.NONE -> {}
                 }
                 touch = Touch.NONE
                 velocityTracker?.recycle()
@@ -852,6 +931,7 @@ class ScintillaView @JvmOverloads constructor(
 
     companion object {
         private const val CARET_HANDLE_MS = 4000L
+        private const val SCROLL_BAR_MS = 1500L
         private var platformReady = false
 
         private fun ensurePlatform(context: Context) {

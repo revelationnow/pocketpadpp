@@ -22,7 +22,7 @@ import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import kotlin.math.roundToInt
 
 /** Find and replace, as a bar that sits above the keyboard instead of Notepad++'s floating dialog. */
-class FindBar(context: Context, private val editor: SciApi) : LinearLayout(context) {
+class FindBar(context: Context, private val editor: SciApi, private val palette: Palette) : LinearLayout(context) {
 
     /** Called when the bar closes, so that focus can go back to the editor. */
     var onClose: (() -> Unit)? = null
@@ -75,7 +75,7 @@ class FindBar(context: Context, private val editor: SciApi) : LinearLayout(conte
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(0xFFF0F0F0.toInt())
+        setBackgroundColor(palette.findBack)
         setPadding(dp(6f), dp(2f), dp(2f), dp(2f))
         visibility = View.GONE
 
@@ -111,7 +111,7 @@ class FindBar(context: Context, private val editor: SciApi) : LinearLayout(conte
 
     private fun options() = SearchOptions(matchCase.isChecked, wholeWord.isChecked, regex.isChecked, wrap.isChecked)
 
-    private fun say(message: String, colour: Int = MESSAGE) {
+    private fun say(message: String, colour: Int = palette.findMessage) {
         status.text = message
         status.setTextColor(colour)
     }
@@ -147,9 +147,9 @@ class FindBar(context: Context, private val editor: SciApi) : LinearLayout(conte
         }
         val result = Searcher.find(editor, text, options(), forward)
         when {
-            !result.found -> say("Can't find the text \"$text\"", NOT_FOUND)
-            result.wrapped && forward -> say("Found the 1st occurrence from the top. The end of the document has been reached.", END_REACHED)
-            result.wrapped -> say("Found the 1st occurrence from the bottom. The beginning of the document has been reached.", END_REACHED)
+            !result.found -> say("Can't find the text \"$text\"", palette.findNotFound)
+            result.wrapped && forward -> say("Found the 1st occurrence from the top. The end of the document has been reached.", palette.findEndReached)
+            result.wrapped -> say("Found the 1st occurrence from the bottom. The beginning of the document has been reached.", palette.findEndReached)
             else -> say("")
         }
     }
@@ -163,7 +163,7 @@ class FindBar(context: Context, private val editor: SciApi) : LinearLayout(conte
         if (text.isEmpty() || '\n' in text || '\r' in text) return
         if (remember) findField.setText(text)
         val result = Searcher.find(editor, text, SearchOptions(matchCase.isChecked, wholeWord.isChecked, regex = false, wrapAround = true), forward)
-        if (!result.found && isOpen) say("Can't find the text \"$text\"", NOT_FOUND)
+        if (!result.found && isOpen) say("Can't find the text \"$text\"", palette.findNotFound)
     }
 
     private fun replace() {
@@ -172,9 +172,9 @@ class FindBar(context: Context, private val editor: SciApi) : LinearLayout(conte
         val (replaced, next) = Searcher.replace(editor, text, replaceField.text.toString(), options())
         when {
             replaced && next.found -> say("1 occurrence was replaced. The next occurrence found.")
-            replaced -> say("1 occurrence was replaced. No more occurrences were found.", END_REACHED)
+            replaced -> say("1 occurrence was replaced. No more occurrences were found.", palette.findEndReached)
             next.found -> say("")
-            else -> say("Can't find the text \"$text\"", NOT_FOUND)
+            else -> say("Can't find the text \"$text\"", palette.findNotFound)
         }
     }
 
@@ -190,12 +190,5 @@ class FindBar(context: Context, private val editor: SciApi) : LinearLayout(conte
         if (text.isEmpty()) return
         val count = Searcher.count(editor, text, options())
         say(if (count == 1) "Count: 1 match." else "Count: $count matches.")
-    }
-
-    private companion object {
-        // Notepad++'s find status colours.
-        const val MESSAGE = 0xFF0000FF.toInt()
-        const val NOT_FOUND = 0xFFFF0000.toInt()
-        const val END_REACHED = 0xFF008000.toInt()
     }
 }

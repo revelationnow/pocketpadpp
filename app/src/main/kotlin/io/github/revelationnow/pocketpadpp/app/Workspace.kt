@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.Language
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
@@ -42,6 +43,7 @@ class Doc(val id: Long, internal val sciDoc: Long, var language: Language) {
     internal var caret = 0L
     internal var anchor = 0L
     internal var firstDocLine = 0L
+    internal var folds: List<Long> = emptyList()
     internal var xOffset = 0L
     internal var eolMode = Eol.LF.sciMode
 
@@ -121,9 +123,16 @@ class Workspace(
     private val context: Context,
     private val editor: ScintillaView,
     val languages: LanguageRegistry,
-    private val theme: NppTheme,
+    theme: NppTheme,
     private val metrics: () -> ViewMetrics,
 ) {
+    /** The Notepad++ theme in use. Setting it restyles the editor straight away. */
+    var theme: NppTheme = theme
+        set(value) {
+            field = value
+            restyle()
+        }
+
     val docs = ArrayList<Doc>()
     lateinit var active: Doc
         private set
@@ -189,6 +198,8 @@ class Workspace(
         doc.anchor = editor.send(Sci.SCI_GETANCHOR)
         doc.firstDocLine = editor.send(Sci.SCI_DOCLINEFROMVISIBLE, editor.send(Sci.SCI_GETFIRSTVISIBLELINE))
         doc.xOffset = editor.send(Sci.SCI_GETXOFFSET)
+        // Which blocks are folded belongs to the view, not the document, so it is carried per tab by hand.
+        doc.folds = EditOps.foldedLines(editor)
         doc.eolMode = editor.send(Sci.SCI_GETEOLMODE).toInt()
         doc.dirty = isDirty(doc)
         writeBackupIfNeeded(doc)
@@ -211,6 +222,7 @@ class Workspace(
                 doc.savePointPending = false
             }
             applyLanguage(doc)
+            EditOps.restoreFolds(editor, doc.folds)
             restoreViewState(doc)
             editor.documentSwitched()
         }

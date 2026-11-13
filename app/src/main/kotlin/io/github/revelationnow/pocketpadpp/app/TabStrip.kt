@@ -14,7 +14,7 @@ import android.widget.TextView
 import kotlin.math.roundToInt
 
 /** The row of document tabs. */
-class TabStrip(context: Context) : HorizontalScrollView(context) {
+class TabStrip(context: Context, private val palette: Palette) : HorizontalScrollView(context) {
 
     class Tab(val title: String, val dirty: Boolean, val active: Boolean)
 
@@ -28,7 +28,7 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
     init {
         isHorizontalScrollBarEnabled = false
         isFillViewport = false
-        setBackgroundColor(BAR)
+        setBackgroundColor(palette.tabBar)
         addView(row, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
@@ -38,7 +38,7 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
         row.removeAllViews()
         var activeView: View? = null
         tabs.forEachIndexed { index, tab ->
-            val item = TabView(context, tab.active).apply {
+            val item = TabView(context, tab.active, palette).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(12f), 0, dp(2f), 0)
@@ -49,7 +49,7 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
                 // Notepad++ marks unsaved tabs with a red icon; a red dot does the same job here.
                 text = if (tab.dirty) "● ${tab.title}" else tab.title
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                setTextColor(if (tab.dirty) DIRTY else if (tab.active) ACTIVE_TEXT else INACTIVE_TEXT)
+                setTextColor(if (tab.dirty) palette.tabDirty else if (tab.active) palette.tabActiveText else palette.tabInactiveText)
                 setTypeface(typeface, if (tab.active) Typeface.BOLD else Typeface.NORMAL)
                 maxLines = 1
             })
@@ -57,7 +57,7 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
                 text = "×"
                 contentDescription = "Close ${tab.title}"
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                setTextColor(INACTIVE_TEXT)
+                setTextColor(palette.tabInactiveText)
                 gravity = Gravity.CENTER
                 setOnClickListener { onClose?.invoke(index) }
             }, LinearLayout.LayoutParams(dp(36f), ViewGroup.LayoutParams.MATCH_PARENT))
@@ -77,12 +77,12 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
     }
 
     /** A tab with Notepad++'s orange bar along the top of the active one. */
-    private class TabView(context: Context, private val active: Boolean) : LinearLayout(context) {
+    private class TabView(context: Context, private val active: Boolean, palette: Palette) : LinearLayout(context) {
         private val indicator = Paint().apply { color = ACTIVE_INDICATOR }
 
         init {
             setWillNotDraw(false)
-            setBackgroundColor(if (active) ACTIVE_BACK else INACTIVE_BACK)
+            setBackgroundColor(if (active) palette.tabActiveBack else palette.tabInactiveBack)
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -92,13 +92,7 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
     }
 
     private companion object {
-        // From Notepad++'s default theme: active tab indicator, inactive tabs.
+        // From Notepad++'s default theme: the bar along the top of the active tab.
         const val ACTIVE_INDICATOR = 0xFFFAAA3C.toInt()
-        const val ACTIVE_BACK = 0xFFFFFFFF.toInt()
-        const val INACTIVE_BACK = 0xFFD8D8D8.toInt()
-        const val BAR = 0xFFC0C0C0.toInt()
-        const val ACTIVE_TEXT = 0xFF000000.toInt()
-        const val INACTIVE_TEXT = 0xFF606060.toInt()
-        const val DIRTY = 0xFFC02020.toInt()
     }
 }
