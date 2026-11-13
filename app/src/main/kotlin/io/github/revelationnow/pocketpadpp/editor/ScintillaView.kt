@@ -26,6 +26,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
+import io.github.revelationnow.pocketpadpp.core.SciApi
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import io.github.revelationnow.pocketpadpp.scintilla.SciHost
 import io.github.revelationnow.pocketpadpp.scintilla.ScintillaNative
@@ -44,7 +45,7 @@ import kotlin.math.roundToInt
 class ScintillaView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-) : View(context, attrs), SciHost {
+) : View(context, attrs), SciHost, SciApi {
 
     /** How the soft keyboard is asked to behave. */
     enum class KeyboardMode {
@@ -64,6 +65,15 @@ class ScintillaView @JvmOverloads constructor(
 
     /** Called after the caret, selection, text or scroll position changed. Safe to query the editor from here. */
     var onStateChanged: (() -> Unit)? = null
+
+    /** Called after the document text changed. */
+    var onTextChanged: (() -> Unit)? = null
+
+    /**
+     * Called for every typed character (SCN_CHARADDED), while the editor is still handling the key.
+     * The handler may edit the document, as auto-indent does.
+     */
+    var onCharAdded: ((Int) -> Unit)? = null
 
     /** Receives one line per soft keyboard request, for diagnosing keyboard behaviour. */
     var imeLog: ((String) -> Unit)? = null
@@ -124,21 +134,39 @@ class ScintillaView @JvmOverloads constructor(
 
     // region Public API
 
-    fun send(msg: Int, wParam: Long = 0, lParam: Long = 0): Long =
+    override fun send(msg: Int, wParam: Long, lParam: Long): Long =
         if (ptr != 0L) ScintillaNative.send(ptr, msg, wParam, lParam) else 0
 
-    /** Sends a message whose lParam is a string. */
-    fun sendText(msg: Int, wParam: Long, text: String): Long =
-        if (ptr != 0L) ScintillaNative.sendString(ptr, msg, wParam, text.toByteArray(Charsets.UTF_8)) else 0
+    override fun sendBytes(msg: Int, wParam: Long, bytes: ByteArray): Long =
+        if (ptr != 0L) ScintillaNative.sendString(ptr, msg, wParam, bytes) else 0
 
-    fun setProperty(key: String, value: String) {
+    override fun sendStrings(msg: Int, first: String, second: String): Long =
         if (ptr != 0L) {
-            ScintillaNative.sendStrings(ptr, Sci.SCI_SETPROPERTY, key.toByteArray(Charsets.UTF_8), value.toByteArray(Charsets.UTF_8))
+            ScintillaNative.sendStrings(ptr, msg, first.toByteArray(Charsets.UTF_8), second.toByteArray(Charsets.UTF_8))
+        } else {
+            0
         }
-    }
+
+    override fun range(start: Long, end: Long): ByteArray =
+        if (ptr != 0L) ScintillaNative.getRange(ptr, start, end) else ByteArray(0)
 
     /** Attaches a Lexilla lexer ("cpp", "python", "xml", ...) to the current document. */
-    fun setLexer(name: String): Boolean = ptr != 0L && ScintillaNative.setLexer(ptr, name)
+    override fun setLexer(name: String): Boolean = ptr != 0L && ScintillaNative.setLexer(ptr, name)
+
+    /**
+     * Call after SCI_SETDOCPOINTER or after replacing the whole text: the soft keyboard and the
+     * scroll state both refer to the previous content.
+     */
+    fun documentSwitched() {
+        if (ptr == 0L) return
+        ScintillaNative.imeFinishComposing(ptr)
+        scroller.forceFinished(true)
+        fracY = 0
+        actionMode?.finish()
+        lastImeState.fill(-2)
+        imm.restartInput(this)
+        invalidate()
+    }
 
     var text: String
         get() = if (ptr != 0L) String(ScintillaNative.getRange(ptr, 0, send(Sci.SCI_GETLENGTH)), Charsets.UTF_8) else ""
@@ -150,9 +178,7 @@ class ScintillaView @JvmOverloads constructor(
             ScintillaNative.sendString(ptr, Sci.SCI_ADDTEXT, bytes.size.toLong(), bytes)
             send(Sci.SCI_GOTOPOS, 0)
             send(Sci.SCI_EMPTYUNDOBUFFER)
-            fracY = 0
-            imm.restartInput(this)
-            invalidate()
+            documentSwitched()
         }
 
     /** Types text at every caret, as a hardware keyboard would. */
@@ -705,7 +731,9 @@ class ScintillaView @JvmOverloads constructor(
         code: Int, position: Long, ch: Int, modifiers: Int, modificationType: Int,
         length: Long, linesAdded: Long, line: Long, margin: Int, updated: Int,
     ) {
-        if (code == Sci.SCN_UPDATEUI) {
+        if (code == Sci.SCN_CHARADDED) {
+            onCharAdded?.invoke(ch)
+        } else if (code == Sci.SCN_UPDATEUI) {
             pendingUpdate = pendingUpdate or updated
             if (!updatePosted) {
                 updatePosted = true
@@ -729,8 +757,9 @@ class ScintillaView @JvmOverloads constructor(
             }
             syncIme()
         }
-        if (textChanged && !hasSelection() && touch == Touch.NONE) {
-            actionMode?.finish()
+        if (textChanged) {
+            if (!hasSelection() && touch == Touch.NONE) actionMode?.finish()
+            onTextChanged?.invoke()
         }
         onStateChanged?.invoke()
         invalidate()
