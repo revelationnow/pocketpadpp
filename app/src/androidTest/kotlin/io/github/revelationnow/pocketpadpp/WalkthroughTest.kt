@@ -1543,8 +1543,11 @@ class WalkthroughTest {
 
         // Non-printing characters get a label.
         setText("a\u00a0b\u200bc")
+        val plainWidth = sci(Sci.SCI_POINTXFROMPOSITION, 0, sci(Sci.SCI_GETLENGTH)) - sci(Sci.SCI_POINTXFROMPOSITION, 0, 0)
         openMenu("View", "Show Symbol", "Show Non-Printing Characters")
         tapDescribed("Close menu")
+        val labelledWidth = sci(Sci.SCI_POINTXFROMPOSITION, 0, sci(Sci.SCI_GETLENGTH)) - sci(Sci.SCI_POINTXFROMPOSITION, 0, 0)
+        assertTrue("the labels take their own room in the line ($plainWidth -> $labelledWidth)", labelledWidth > plainWidth * 2)
         shot("non-printing-characters")
         assertTrue(context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("showNpc", false))
     }

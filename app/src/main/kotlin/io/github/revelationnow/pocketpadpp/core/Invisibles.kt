@@ -25,5 +25,13 @@ object Invisibles {
         sci.send(Sci.SCI_CLEARALLREPRESENTATIONS)
         if (!control) for (codePoint in CONTROL) sci.sendStrings(Sci.SCI_CLEARREPRESENTATION, encoded(codePoint), "")
         if (nonPrinting) for ((codePoint, label) in NON_PRINTING) sci.sendStrings(Sci.SCI_SETREPRESENTATION, encoded(codePoint), label)
+        // Scintilla keeps the measured lines it already has, in which the labels have the width of the characters
+        // they stand for (none at all for a zero-width space). Emptying both caches makes it measure again.
+        val layoutCache = sci.send(Sci.SCI_GETLAYOUTCACHE)
+        sci.send(Sci.SCI_SETLAYOUTCACHE, if (layoutCache == Sci.SC_CACHE_NONE.toLong()) Sci.SC_CACHE_CARET.toLong() else Sci.SC_CACHE_NONE.toLong())
+        sci.send(Sci.SCI_SETLAYOUTCACHE, layoutCache)
+        val positionCache = sci.send(Sci.SCI_GETPOSITIONCACHE)
+        sci.send(Sci.SCI_SETPOSITIONCACHE, 0)
+        sci.send(Sci.SCI_SETPOSITIONCACHE, positionCache)
     }
 }
