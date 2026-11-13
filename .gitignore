@@ -1,0 +1,18 @@
+# Gradle / Android
+.gradle/
+build/
+local.properties
+captures/
+.cxx/
+.externalNativeBuild/
+*.apk
+*.aab
+*.iml
+.idea/
+.kotlin/
+
+# Desktop test harness output
+hosttest/build/
+hosttest/out/
+
+.DS_Store
