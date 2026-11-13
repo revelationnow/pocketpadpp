@@ -1110,6 +1110,51 @@ class WalkthroughTest {
         assertEquals("abcdef", text())
         assertEquals("no tab was closed or opened by mistake", 1, onUi { it.workspace.docs.size })
 
+        // Copy and cut need the selection, which a suggestion keyboard replaces with the typed letter.
+        fun clipboard() = onUi { it.editor.getClipboard() }
+        setText("alpha beta")
+        sci(Sci.SCI_SETSEL, 6, 10)
+        onUi { it.editor.setClipboard("") }
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val adopted = it.editor.onCreateInputConnection(EditorInfo())!!
+            adopted.setComposingRegion(6, 10)
+            adopted.setComposingText("c", 1)
+        }
+        assertEquals("Ctrl+C on a selected, composed word copies it", "beta", clipboard())
+        assertEquals("and leaves it in place", "alpha beta" to "6-10", text() to selection())
+
+        sci(Sci.SCI_SETSEL, 0, 5)
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi { it.editor.onCreateInputConnection(EditorInfo())!!.setComposingText("c", 1) }
+        assertEquals("Ctrl+C on a plain selection", "alpha", clipboard())
+        assertEquals("alpha beta", text())
+
+        sci(Sci.SCI_SETSEL, 2, 4)
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val adopted = it.editor.onCreateInputConnection(EditorInfo())!!
+            adopted.setComposingRegion(0, 5)
+            adopted.setComposingText("alca", 1)
+        }
+        assertEquals("Ctrl+C on part of a composed word", "ph", clipboard())
+        assertEquals("alpha beta", text())
+
+        sci(Sci.SCI_SETSEL, 6, 10)
+        SystemClock.sleep(700)
+        tap("Ctrl")
+        onUi {
+            val clearing = it.editor.onCreateInputConnection(EditorInfo())!!
+            clearing.commitText("", 1)
+            clearing.setComposingText("x", 1)
+        }
+        assertEquals("Ctrl+X when the keyboard clears the selection first", "beta", clipboard())
+        assertEquals("alpha ", text())
+        assertEquals(0, held())
+
         // A hardware keyboard goes through the same table.
         val now = SystemClock.uptimeMillis()
         val meta = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON

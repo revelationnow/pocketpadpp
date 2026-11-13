@@ -226,16 +226,28 @@ class ScintillaView @JvmOverloads constructor(
         if (modifiers == 0 || ptr == 0L) return false
         var typed: Char? = null
         if (modifiers and (Sci.SCMOD_CTRL or Sci.SCMOD_ALT) != 0) {
+            if (text.isEmpty() && hasSelection()) {
+                // Some keyboards clear the selection before sending the key typed over it. With Ctrl or Alt
+                // held the key is a shortcut that needs that selection (copy, cut), so it is left alone.
+                return true
+            }
             if (!composing) {
                 if (text.length == 1) typed = text[0]
             } else {
                 // With suggestions on, the keyboard sends the whole word it is composing on every key press,
                 // and after a paste or a tap it adopts the word around the caret. The key just pressed is the
-                // one character added to that word, at the caret.
+                // one character added to that word at the caret, in place of whatever part of it is selected.
                 ScintillaNative.imeState(ptr, imeState)
-                val composed = if (imeState[2] >= 0) imeState[3] - imeState[2] else 0
-                val caretInWord = if (imeState[2] >= 0 && imeState[0] == imeState[1]) imeState[0] - imeState[2] else composed
-                if (text.length == composed + 1) typed = text[caretInWord.coerceIn(0, composed)]
+                val (selStart, selEnd, wordStart, wordEnd) = imeState
+                val composed = if (wordStart >= 0) wordEnd - wordStart else 0
+                val inside = wordStart >= 0 && selStart >= wordStart && selEnd <= wordEnd
+                val selected = if (inside) selEnd - selStart else 0
+                val at = if (inside) selStart - wordStart else composed
+                typed = when {
+                    text.length == composed - selected + 1 && at in text.indices -> text[at]
+                    text.length == 1 -> text[0]
+                    else -> null
+                }
             }
         }
         if (typed == null) {
