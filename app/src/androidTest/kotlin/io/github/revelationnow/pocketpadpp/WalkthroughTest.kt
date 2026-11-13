@@ -1014,6 +1014,7 @@ class WalkthroughTest {
         tap("\u2192")
         assertEquals("Shift+Right selects", "0-1", selection())
         sci(Sci.SCI_GOTOPOS, 0)
+        sci(Sci.SCI_CHOOSECARETX)
         tap("Shift")
         tap("Shift")
         tap("Alt")

@@ -60,6 +60,7 @@ class MenuSheet(private val context: Context, dark: Boolean = false) {
 
     private val density = context.resources.displayMetrics.density
     private val stack = ArrayList<Level>()
+    private var shownLevel: Level? = null
     private val textColour get() = if (dark) 0xFFE6E6E6.toInt() else 0xFF202020.toInt()
     private val dim get() = if (dark) 0xFF8A8A8A.toInt() else 0xFF9A9A9A.toInt()
     private val back get() = if (dark) 0xFF2B2B2B.toInt() else 0xFFFFFFFF.toInt()
@@ -173,6 +174,9 @@ class MenuSheet(private val context: Context, dark: Boolean = false) {
     private fun render() {
         val level = stack.last()
         val spec = MenuSpec().apply(level.build)
+        // Ticking an item redraws the same list, which must not jump back to its top.
+        val scrollY = if (level === shownLevel) scroller.scrollY else 0
+        shownLevel = level
         root.setBackgroundColor(back)
         header.setBackgroundColor(headerBack)
         backButton.setTextColor(accent)
@@ -188,7 +192,8 @@ class MenuSheet(private val context: Context, dark: Boolean = false) {
         scroller.layoutParams = (scroller.layoutParams as LinearLayout.LayoutParams).apply {
             height = if (spec.entries.size * dp(46f) > maxHeight) maxHeight else ViewGroup.LayoutParams.WRAP_CONTENT
         }
-        scroller.scrollTo(0, 0)
+        scroller.scrollTo(0, scrollY)
+        scroller.post { scroller.scrollTo(0, scrollY) }
     }
 
     private fun row(entry: MenuSpec.Entry): View {
