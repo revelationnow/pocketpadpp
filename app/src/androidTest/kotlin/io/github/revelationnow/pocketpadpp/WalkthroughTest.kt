@@ -206,10 +206,20 @@ class WalkthroughTest {
         event.recycle()
     }
 
-    private fun tapAt(x: Float, y: Float) {
-        val down = SystemClock.uptimeMillis()
-        touch(MotionEvent.ACTION_DOWN, x, y, down, down)
-        touch(MotionEvent.ACTION_UP, x, y, down, down + 40)
+    /** A tap. [at] fixes the time stamp, so that the gap between two taps does not depend on how busy the emulator is. */
+    private fun tapAt(x: Float, y: Float, at: Long = SystemClock.uptimeMillis()) {
+        touch(MotionEvent.ACTION_DOWN, x, y, at, at)
+        touch(MotionEvent.ACTION_UP, x, y, at, at + 40)
+    }
+
+    /** A quick flick: the finger covers the distance in [millis] by the events' own clock and lifts without stopping. */
+    private fun flick(fromX: Float, fromY: Float, toX: Float, toY: Float, millis: Long = 60, steps: Int = 6) {
+        val down = SystemClock.uptimeMillis() - millis - 20
+        touch(MotionEvent.ACTION_DOWN, fromX, fromY, down, down)
+        for (i in 1..steps) {
+            touch(MotionEvent.ACTION_MOVE, fromX + (toX - fromX) * i / steps, fromY + (toY - fromY) * i / steps, down, down + millis * i / steps)
+        }
+        touch(MotionEvent.ACTION_UP, toX, toY, down, down + millis + 2)
     }
 
     private fun longPressAt(x: Float, y: Float) {
@@ -606,16 +616,16 @@ class WalkthroughTest {
         assertEquals("the view stays where it was left", afterDrag, sci(Sci.SCI_GETFIRSTVISIBLELINE))
 
         // A fast flick keeps going after the finger lifts.
-        drag(centreX, bounds.bottom - 200f, centreX, bounds.top + 300f, steps = 4, stepDelay = 8, settle = false)
+        flick(centreX, bounds.bottom - 200f, centreX, bounds.top + 300f)
         SystemClock.sleep(3000)
         assertTrue("fling carried on", sci(Sci.SCI_GETFIRSTVISIBLELINE) > afterDrag + 40)
 
         // Double tap selects a word; long press selects a word and shows the edit toolbar.
         setText("alpha beta gamma\nsecond line\n")
         val (x, y) = pointOf(7)
-        tapAt(x, y)
-        SystemClock.sleep(80)
-        tapAt(x, y)
+        val firstTap = SystemClock.uptimeMillis() - 400
+        tapAt(x, y, firstTap)
+        tapAt(x, y, firstTap + 150)
         device.waitForIdle()
         assertEquals("double tap selects the word", "6-10", selection())
         shot("double-tap-selection")
