@@ -3632,7 +3632,7 @@ open class MainActivity : Activity() {
     private fun showHexStatus() {
         val session = hexShown ?: return
         val at = hexView.cursor
-        hexLabel.text = "Offset 0x%08X (%d) \u00B7 %d bytes \u00B7 %s%s".format(
+        hexLabel.text = "0x%X (%d) \u00B7 %d bytes \u00B7 %s%s".format(
             at, at, session.buffer.size, if (hexView.inText) "text" else "hex", if (session.buffer.modified) " \u00B7 modified" else "",
         )
     }

@@ -2575,7 +2575,8 @@ class WalkthroughTest {
             assertTrue("a line that differs in part is marked as changed", marked(activity.editor, 2, 12))
             assertTrue("and so is its counterpart", marked(other, 1, 12))
             assertTrue("a line only in the old text is marked as removed", marked(other, 3, 11))
-            assertTrue("lines that are the same are not marked", activity.editor.send(Sci.SCI_MARKERGET, 3) and 0x3C00L == 0L)
+            // Markers 10 to 12 tint the lines; 13 only says that a blank row follows.
+            assertTrue("lines that are the same are not tinted", activity.editor.send(Sci.SCI_MARKERGET, 3) and 0x1C00L == 0L)
             assertEquals("a blank row stands in above for the line only below", 1L, activity.editor.send(Sci.SCI_ANNOTATIONGETLINES, 3))
             assertEquals("and below for the two lines only above", 2L, other.send(Sci.SCI_ANNOTATIONGETLINES, 4))
         }
@@ -2722,6 +2723,7 @@ class WalkthroughTest {
             tap("Find")
             answer("Bytes to find", "\"END\"")
             assertEquals(0x200, cursor())
+            waitUntil("the byte found to be on screen") { onUi { it.hexView.pointOf(0x200).second.let { y -> y > 0 && y < it.hexView.height } } }
             shot("hex-found")
 
             // Bytes per Row.

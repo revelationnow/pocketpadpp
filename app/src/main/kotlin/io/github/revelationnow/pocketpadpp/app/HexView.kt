@@ -121,6 +121,8 @@ class HexView(context: Context) : View(context) {
             else -> 4
         }
         scroll = scroll.coerceIn(0f, maxScroll())
+        // The keyboard coming up must not cover the byte being worked on.
+        reveal()
     }
 
     override fun requestLayout() {
