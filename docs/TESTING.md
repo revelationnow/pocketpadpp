@@ -43,6 +43,13 @@ and saves a screenshot at every step. It covers:
 - the side panel: Document List, Folder as Workspace over a real folder tree, and the Function List for
   Python and C, including that this device's regular expression engine accepts every Notepad++ rule
 - auto-completion from the document and from the language's functions, parameter hints, path completion
+- the Document Map: same document, following the editor, a touch moving it, kept across a restart
+- Project Panels: a project, a folder, files added and opened from it, kept across a restart
+- user-defined languages: the bundled Markdown definition, importing one, its colours and comment marks,
+  editing it and seeing the change, removing it
+- the split screen: clone and move to the other view, that it takes no typing, scrolling and zooming
+  together, swapping the views, and a second window for a file
+- right-to-left text direction: where the text is drawn, and that a touch still finds its character
 - highlighting for C++, Python, HTML and JSON
 
 Long menus are not swiped through: the test asks the app to bring the wanted row on screen and then taps
@@ -71,7 +78,14 @@ Editor:
 - Composing text goes to the main caret only when several carets exist (committed text reaches all of
   them). With suggestions off this does not apply.
 - No magnifier while dragging the caret.
-- Right-to-left and bidirectional text are not laid out correctly.
+- Text Direction RTL mirrors the view, as Notepad++ does. Right-to-left scripts read correctly within a
+  piece of text of one style; a line that mixes both directions is laid out piece by piece, and
+  left-to-right text in a right-to-left view puts the caret on the mirrored side of a piece.
+- The second view of the split screen scrolls, selects and copies but takes no typing; Focus on Another
+  View swaps the two. The split is not remembered across restarts.
+- A second window (Open in New Instance) keeps no session: what is unsaved in it is asked about on Back,
+  and lost if Android closes the window.
+- User-defined languages are edited as their XML definition files; there is no form for it.
 - Scintilla's own autocompletion lists and call tips are stubbed out in the platform layer; the app shows
   completions and parameter hints in a row above the keyboard instead.
 - No TalkBack / accessibility support beyond labelled buttons.

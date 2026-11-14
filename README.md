@@ -42,7 +42,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 
 ## What works today
 
-451 of the 481 commands in Notepad++'s menus are implemented. In short:
+469 of the 481 commands in Notepad++'s menus are implemented; the other 12 are tied to Windows. In short:
 
 **Editing**
 - Syntax highlighting and folding for 94 languages, with Notepad++'s keywords and file extensions
@@ -78,6 +78,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - Notepad++'s default theme, dark mode and 22 further themes; the app around the editor turns light or dark to match
 - Word wrap, show spaces / tabs / line endings / indent guides, zoom, line numbers, fold levels
 - Hide lines, full screen and distraction free mode
+- Right-to-left text direction
 - Document summary
 
 **Panels**
@@ -85,6 +86,14 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - Document List: every open document
 - Folder as Workspace: folders you add, as a tree whose files open with a tap
 - Function List: the functions and classes of the document, from Notepad++'s own rules for 47 languages
+- Project Panels 1 to 3: projects, folders and files kept as Notepad++ workspace files
+- Document Map: the whole document in tiny print beside the editor; touch it to go there
+- Split screen: a second view of the same or another document for reading, scrolling in step if you like,
+  and a second window for a file of its own
+
+**Languages of your own**
+- Notepad++'s user-defined language files (UDL) work as they are: import them, edit them, export them
+- Markdown is highlighted out of the box, with the definitions Notepad++ itself ships
 
 **Macros and Run**
 - Record typing and editing keys, play the recording back once, a number of times or to the end of the file,
@@ -157,14 +166,13 @@ The [feature map](docs/FEATURES.md) lists every Notepad++ command with its statu
 
 | Area | Planned |
 |---|---|
-| Panels | Document map, project panels, split view |
-| Languages | User-defined languages |
-| Search | Notepad++'s regular expression syntax |
+| Search | Notepad++'s regular expression syntax in Find and Replace |
+| Languages | A form for defining a language, in place of editing its XML |
 | Plugins | Notepad++ plugins are Windows libraries and cannot run as they are. A plugin system that builds from source is planned, starting with a hex editor and a compare tool |
 
 Known gaps in what exists are listed in [docs/TESTING.md](docs/TESTING.md#known-gaps). The ones you are most
 likely to meet: regular expressions use ECMAScript syntax for now (no lookbehind), folds are not remembered
-across restarts, files over 64 MB are refused, and there is no right-to-left text support.
+across restarts, files over 64 MB are refused, and the second view of the split screen is for reading, not typing.
 
 ## How it is put together
 
@@ -209,7 +217,10 @@ into the issue together with the name of your keyboard app.
 
 - [Notepad++](https://notepad-plus-plus.org/) by Don Ho and contributors, for the editor this project follows,
   and for its language definitions, themes and user-defined-language lexer, which are used here under the GPL.
+  Its function list rules, auto-completion files and function list test files are used the same way.
 - [Scintilla and Lexilla](https://www.scintilla.org/) by Neil Hodgson and contributors, the editing engine and lexers.
+- [Markdown-plus-plus](https://github.com/Edditoria/markdown-plus-plus) by Edditoria (MIT licence), the Markdown
+  language definitions that Notepad++ ships and that come with this app too.
 
 The Pocketpad++ name and logo are this project's own. "Notepad++" is the name of the original project and is
 used here only to describe what Pocketpad++ is modelled on.
