@@ -15,6 +15,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Direction
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -198,6 +199,23 @@ class WalkthroughTest {
         val list = device.wait(Until.findObject(By.clazz("android.widget.ScrollView")), 4000) ?: throw AssertionError("No panel is open")
         return list.wait(Until.findObject(By.text(label)), 8000) ?: throw AssertionError("The panel has no row \"$label\"")
     }
+
+    // The panel draws its rows again whenever what it lists changes, which can happen between finding a row
+    // and touching it; the row is then simply looked up again.
+    private fun <T> onFreshRow(action: () -> T): T {
+        repeat(4) {
+            try {
+                return action()
+            } catch (e: StaleObjectException) {
+                SystemClock.sleep(300)
+            }
+        }
+        return action()
+    }
+
+    private fun panelClick(label: String) = onFreshRow { panelRow(label).click() }.also { device.waitForIdle() }
+
+    private fun panelLongClick(label: String) = onFreshRow { panelRow(label).longClick() }.also { device.waitForIdle() }
 
     private fun openMenu(vararg path: String) {
         tapDescribed("Menu")
@@ -1949,7 +1967,7 @@ class WalkthroughTest {
             openMenu("View", "Document List")
             panelRow("new 1")
             shot("document-list")
-            panelRow("new 1").click()
+            panelClick("new 1")
             device.waitForIdle()
             assertEquals("new 1", active())
             assertTrue("the panel closes after a choice", device.wait(Until.gone(By.desc("Close panel")), 3000) == true)
@@ -1957,10 +1975,10 @@ class WalkthroughTest {
             // Folder as Workspace: a tree of the folder, whose files open with a tap.
             onUi { it.addWorkspaceFolder(Uri.fromFile(project)) }
             panelRow("readme.txt")
-            panelRow("src").click()
+            panelClick("src")
             panelRow("tool.py")
             shot("folder-as-workspace")
-            panelRow("tool.py").click()
+            panelClick("tool.py")
             waitUntil("the file from the tree to open") { active() == "tool.py" }
             assertEquals("def run():\n    return 1\n", text())
             assertTrue("with its language", onScreen("Python"))
@@ -1975,7 +1993,7 @@ class WalkthroughTest {
             tap("Documents")
             panelRow("tool.py")
             tap("Folders")
-            panelRow("project").longClick()
+            panelLongClick("project")
             device.waitForIdle()
             tap("Remove from Workspace")
             assertEquals(emptyList<Uri>(), onUi { it.workspaceFolders() })
@@ -2000,7 +2018,7 @@ class WalkthroughTest {
         panelRow("Shop")
         panelRow("close(self)")
         shot("function-list-python")
-        panelRow("last()").click()
+        panelClick("last()")
         device.waitForIdle()
         val line = python.substring(0, python.indexOf("def last")).count { it == '\n' }.toLong()
         waitUntil("the caret to go to the function") { sci(Sci.SCI_LINEFROMPOSITION, sci(Sci.SCI_GETCURRENTPOS)) == line }
@@ -2017,7 +2035,7 @@ class WalkthroughTest {
         shot("function-list-c")
         tap("Documents")
         tap("Functions")
-        panelRow("main(void)").click()
+        panelClick("main(void)")
         device.waitForIdle()
         assertEquals(8L, sci(Sci.SCI_LINEFROMPOSITION, sci(Sci.SCI_GETCURRENTPOS)))
 
@@ -2167,13 +2185,13 @@ class WalkthroughTest {
             openMenu("View", "Project Panels", "Project Panel 1")
             tap("New Project")
             name("Project name", "Book")
-            panelRow("Book").longClick()
+            panelLongClick("Book")
             tap("Add Folder...")
             name("Folder name", "Drafts")
-            panelRow("Drafts").longClick()
+            panelLongClick("Drafts")
             tap("Add Current File")
             panelRow("chapter.txt")
-            panelRow("Book").longClick()
+            panelLongClick("Book")
             tap("Rename...")
             name("New name", "Novel")
             panelRow("Novel")
@@ -2184,7 +2202,7 @@ class WalkthroughTest {
             tapDescribed("Close chapter.txt")
             assertTrue(active() != "chapter.txt")
             openMenu("View", "Project Panels", "Project Panel 1")
-            panelRow("chapter.txt").click()
+            panelClick("chapter.txt")
             waitUntil("the file to open from the project") { active() == "chapter.txt" }
 
             // Projects are kept, each panel on its own, and a panel that holds something has its tab.
@@ -2196,7 +2214,7 @@ class WalkthroughTest {
             assertTrue(onUi { it.projectPanel(1).isEmpty() })
             openMenu("View", "Document List")
             tap("Project 1")
-            panelRow("Novel").longClick()
+            panelLongClick("Novel")
             tap("Remove")
             assertTrue(onUi { it.projectPanel(0).isEmpty() })
             tapDescribed("Close panel")
@@ -2533,6 +2551,229 @@ class WalkthroughTest {
         sci(Sci.SCI_FOLDLINE, 19, Sci.SC_FOLDACTION_CONTRACT.toLong())
         hideKeyboard()
         shot("readme-monokai")
+    }
+
+    @Test
+    fun comparePlugin() {
+        fun differences() = onUi { it.comparisonDifferences }
+        fun line() = sci(Sci.SCI_LINEFROMPOSITION, sci(Sci.SCI_GETCURRENTPOS))
+        fun marked(view: ScintillaView, line: Long, marker: Int) = view.send(Sci.SCI_MARKERGET, line) and (1L shl marker) != 0L
+        fun result() = device.wait(Until.findObject(By.desc("Compare result")), 4000)!!.text
+        val older = "one\ntwo\nthree\nfour\nfive\n"
+        setText(older)
+        tap("New")
+        setText("one\n2\ntwo and a half\nthree\nfive\nsix\nseven\n")
+
+        // Compare: this document above as the new text, its neighbour below as the old one.
+        openMenu("Plugins", "Compare", "Compare")
+        waitUntil("the comparison to finish") { differences() == 3 }
+        assertEquals("new 1", onUi { it.otherDoc?.name })
+        assertTrue("3 differences", result().startsWith("3 differences"))
+        onUi { activity ->
+            val other = activity.otherView!!
+            assertTrue("a line only in the new text is marked as added", marked(activity.editor, 1, 10))
+            assertTrue("a line that differs in part is marked as changed", marked(activity.editor, 2, 12))
+            assertTrue("and so is its counterpart", marked(other, 1, 12))
+            assertTrue("a line only in the old text is marked as removed", marked(other, 3, 11))
+            assertTrue("lines that are the same are not marked", activity.editor.send(Sci.SCI_MARKERGET, 3) and 0x3C00L == 0L)
+            assertEquals("a blank row stands in above for the line only below", 1L, activity.editor.send(Sci.SCI_ANNOTATIONGETLINES, 3))
+            assertEquals("and below for the two lines only above", 2L, other.send(Sci.SCI_ANNOTATIONGETLINES, 4))
+        }
+        assertEquals("the view goes to the first difference", 1L, line())
+        shot("compare")
+
+        // From one difference to the next and back.
+        tapDescribed("Next difference")
+        assertEquals(3L, line())
+        tapDescribed("Next difference")
+        assertEquals(5L, line())
+        tapDescribed("Previous difference")
+        assertEquals(3L, line())
+        tapDescribed("First difference")
+        assertEquals(1L, line())
+        tapDescribed("Last difference")
+        assertEquals(5L, line())
+
+        // The options compare again at once.
+        setText("ONE\nTwo\nthree\nfour\nfive\n")
+        waitUntil("the comparison to follow the typing") { differences() == 1 }
+        openMenu("Plugins", "Compare", "Ignore Case")
+        waitUntil("capitals to stop counting") { differences() == 0 }
+        tapDescribed("Close menu")
+        assertTrue(result().startsWith("No differences"))
+        openMenu("Plugins", "Compare", "Ignore Case")
+        tapDescribed("Close menu")
+        waitUntil("capitals to count again") { differences() == 1 }
+
+        // Clearing takes the marks and the second view away.
+        tapDescribed("Clear compare")
+        assertEquals(-1, differences())
+        assertNull(onUi { it.otherView })
+        assertEquals("no marks are left", -1L, sci(Sci.SCI_MARKERNEXT, 0, 0x3C00))
+        assertEquals("no blank rows are left", 0L, sci(Sci.SCI_ANNOTATIONGETLINES, 0))
+
+        // Compare to Clipboard: the clipboard's text in a tab that lasts as long as the comparison.
+        setText(older)
+        onUi { it.editor.setClipboard("one\ntwo\n") }
+        openMenu("Plugins", "Compare", "Compare to Clipboard")
+        waitUntil("the comparison with the clipboard") { differences() == 1 }
+        assertEquals("Clipboard", onUi { it.otherDoc?.name })
+        assertEquals(3, onUi { it.workspace.docs.size })
+        shot("compare-clipboard")
+        openMenu("Plugins", "Compare", "Clear Active Compare")
+        assertEquals(-1, differences())
+        assertEquals("the clipboard's tab goes with the comparison", listOf("new 1", "new 2"), onUi { it.workspace.docs.map { doc -> doc.name } })
+
+        // Diff since Last Save: the text against the file it came from.
+        val file = File(context.cacheDir, "saved.txt").apply { writeText("alpha\nbeta\n") }
+        try {
+            onUi { it.openUris(listOf(Uri.fromFile(file))) }
+            waitUntil("the file to open") { onUi { it.workspace.active.name } == "saved.txt" }
+            sci(Sci.SCI_DOCUMENTEND)
+            onUi { it.editor.typeText("gamma") }
+            openMenu("Plugins", "Compare", "Diff since Last Save")
+            waitUntil("the comparison with the saved file") { differences() == 1 }
+            assertEquals("saved.txt (saved)", onUi { it.otherDoc?.name })
+            assertEquals("alpha\nbeta\n", onUi { it.otherView!!.text })
+            assertEquals(2L, line())
+            shot("compare-saved")
+            tapDescribed("Clear compare")
+            assertNull(onUi { it.otherView })
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun hexEditor() {
+        fun shown() = onUi { it.hexViewShown }
+        fun bytes() = onUi { it.hexView.buffer.toByteArray().toList() }
+        fun cursor() = onUi { it.hexView.cursor }
+        fun status() = device.wait(Until.findObject(By.desc("Hex status")), 4000)!!.text
+        fun tapByte(offset: Int, text: Boolean = false) {
+            val (x, y) = onUi { activity ->
+                val at = IntArray(2)
+                activity.hexView.getLocationOnScreen(at)
+                val (dx, dy) = activity.hexView.pointOf(offset, text)
+                (at[0] + dx) to (at[1] + dy)
+            }
+            tapAt(x, y)
+            device.waitForIdle()
+        }
+        fun answer(description: String, value: String) {
+            device.wait(Until.findObject(By.desc(description)), 4000)!!.text = value
+            tapButton("OK")
+        }
+        // Bytes no text encoding would bring back whole: a zero, 0xFF, a lone 0x80.
+        val original = byteArrayOf(0x00, 0xFF.toByte(), 0x80.toByte(), 0x50, 0x4B, 0x0D, 0x0A, 0xC3.toByte()) + ByteArray(592) { (it * 7).toByte() }
+        "END".toByteArray().copyInto(original, 0x200)
+        val file = File(context.cacheDir, "blob.bin").apply { writeBytes(original) }
+        try {
+            onUi { it.openUris(listOf(Uri.fromFile(file))) }
+            waitUntil("the file to open") { onUi { it.workspace.active.name } == "blob.bin" }
+
+            // View in HEX shows a saved file's own bytes.
+            openMenu("Plugins", "Hex Editor", "View in HEX")
+            waitUntil("the bytes to show") { shown() }
+            tapDescribed("Close menu")
+            assertEquals("the bytes are the file's, one for one", original.toList(), bytes())
+            assertTrue(status().contains("600 bytes"))
+            shot("hex-view")
+
+            // Typing two hex digits over a byte.
+            tapByte(0)
+            assertEquals(0, cursor())
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_4)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_A)
+            waitUntil("the typed byte") { bytes()[0] == 0x4A.toByte() && cursor() == 1 }
+            assertTrue("the status says so", status().contains("modified"))
+            assertTrue("and so does the tab", onUi { it.hexView.buffer.modified })
+
+            // Typing a character in the text column.
+            tapByte(4, text = true)
+            assertEquals(4, cursor())
+            assertTrue(onUi { it.hexView.inText })
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_Z)
+            waitUntil("the typed character") { bytes()[4] == 'z'.code.toByte() && cursor() == 5 }
+
+            // Insert, delete, and Undo for each of them.
+            tapDescribed("Insert byte")
+            assertEquals(601, bytes().size)
+            assertEquals(0.toByte(), bytes()[5])
+            assertEquals(original[5], bytes()[6])
+            tapDescribed("Delete byte")
+            assertEquals(600, bytes().size)
+            tap("Undo")
+            assertEquals(601, bytes().size)
+            tap("Undo")
+            assertEquals(600, bytes().size)
+            tap("Undo")
+            assertEquals(original[4], bytes()[4])
+            tap("Redo")
+            assertEquals('z'.code.toByte(), bytes()[4])
+
+            // Go to an offset; find bytes, and a text.
+            tapDescribed("Go to offset")
+            answer("Offset", "0x200")
+            assertEquals(0x200, cursor())
+            tap("Find")
+            answer("Bytes to find", "FF 80")
+            assertEquals(1, cursor())
+            tap("Find")
+            answer("Bytes to find", "\"END\"")
+            assertEquals(0x200, cursor())
+            shot("hex-found")
+
+            // Bytes per Row.
+            openMenu("Plugins", "Hex Editor", "Bytes per Row", "4")
+            tapDescribed("Close menu")
+            assertEquals(4, onUi { it.hexView.bytesPerRow })
+            openMenu("Plugins", "Hex Editor", "Bytes per Row", "Fit Width")
+            tapDescribed("Close menu")
+
+            // Save writes exactly these bytes.
+            tap("Save")
+            waitUntil("the save to finish") { !onUi { it.hexView.buffer.modified } }
+            val expected = original.copyOf().also {
+                it[0] = 0x4A
+                it[4] = 'z'.code.toByte()
+            }
+            assertEquals("the file holds the bytes as edited, the odd ones untouched", expected.toList(), file.readBytes().toList())
+
+            // Another tab shows its text; coming back, the bytes and the place are as they were.
+            tap("New")
+            assertTrue("a text tab shows the editor", !shown())
+            onUi { activity -> activity.workspace.activate(activity.workspace.docs.first { it.name == "blob.bin" }) }
+            waitUntil("the bytes to show again") { shown() }
+            assertEquals(0x200, cursor())
+
+            // Leaving with changed bytes asks what to do with them.
+            onUi { it.hexView.setCursor(0, false) }
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_0)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_0)
+            waitUntil("the typed byte") { bytes()[0] == 0.toByte() }
+            tapDescribed("Leave HEX view")
+            tapButton("No")
+            waitUntil("the text to show") { !shown() }
+            assertEquals("nothing was written", expected.toList(), file.readBytes().toList())
+
+            // A document that is not a saved file: its text as bytes, and the bytes typed go back into the text.
+            onUi { activity -> activity.workspace.activate(activity.workspace.docs.first { it.uri == null }) }
+            setText("AB")
+            onUi { it.setHexView(true) }
+            assertTrue(shown())
+            assertEquals(listOf<Byte>(0x41, 0x42), bytes())
+            onUi { it.hexView.setCursor(0, false) }
+            onUi { it.hexView.type("43") }
+            shot("hex-text")
+            tapDescribed("Leave HEX view")
+            waitUntil("the text to show") { !shown() }
+            assertEquals("CB", text())
+            sci(Sci.SCI_UNDO)
+            assertEquals("AB", text())
+        } finally {
+            file.delete()
+        }
     }
 
     private companion object {

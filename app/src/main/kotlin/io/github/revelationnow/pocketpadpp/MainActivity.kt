@@ -35,6 +35,7 @@ import io.github.revelationnow.pocketpadpp.app.FileIo
 import io.github.revelationnow.pocketpadpp.app.FindBar
 import io.github.revelationnow.pocketpadpp.app.FolderNode
 import io.github.revelationnow.pocketpadpp.app.FolderTree
+import io.github.revelationnow.pocketpadpp.app.HexView
 import io.github.revelationnow.pocketpadpp.app.PanelSpec
 import io.github.revelationnow.pocketpadpp.app.SidePanel
 import io.github.revelationnow.pocketpadpp.app.LoadedFile
@@ -45,7 +46,10 @@ import io.github.revelationnow.pocketpadpp.app.TabStrip
 import io.github.revelationnow.pocketpadpp.app.Workspace
 import io.github.revelationnow.pocketpadpp.core.ApiIndex
 import io.github.revelationnow.pocketpadpp.core.CallSite
+import io.github.revelationnow.pocketpadpp.core.Compare
 import io.github.revelationnow.pocketpadpp.core.Completion
+import io.github.revelationnow.pocketpadpp.core.Diff
+import io.github.revelationnow.pocketpadpp.core.DiffOptions
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.EditorOptions
 import io.github.revelationnow.pocketpadpp.core.FunctionEntry
@@ -59,6 +63,7 @@ import io.github.revelationnow.pocketpadpp.core.WordStyle
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
+import io.github.revelationnow.pocketpadpp.core.HexBuffer
 import io.github.revelationnow.pocketpadpp.core.Invisibles
 import io.github.revelationnow.pocketpadpp.core.SessionStore
 import io.github.revelationnow.pocketpadpp.app.ResultsPanel
@@ -211,6 +216,12 @@ open class MainActivity : Activity() {
             options.apply(editor, resources.displayMetrics.density)
             styleDocumentMap()
             styleOtherView()
+            if (hexShown != null) styleHex()
+            // Styling a view again takes the comparison's colours with it.
+            if (comparing != null) {
+                Compare.setup(editor, palette.dark)
+                otherView?.let { Compare.setup(it, palette.dark) }
+            }
         }
         syncVertical = prefs.getBoolean("syncVertical", false)
         syncHorizontal = prefs.getBoolean("syncHorizontal", false)
@@ -225,7 +236,10 @@ open class MainActivity : Activity() {
         editor.rightToLeft = prefs.getBoolean("rightToLeft", false)
 
         editor.onStateChanged = { onEditorStateChanged() }
-        editor.onTextChanged = { workspace.textChanged() }
+        editor.onTextChanged = {
+            workspace.textChanged()
+            compareAgainSoon()
+        }
         editor.onCharAdded = { ch ->
             // Auto-indent happens again on playback, so what it does is not part of a macro.
             macroPaused = true
@@ -282,9 +296,9 @@ open class MainActivity : Activity() {
         tool("New", "New") { workspace.newDocument() }
         tool("Open", "Open") { openFiles() }
         tool("Save", "Save") { save() }
-        tool("Undo", "Undo") { editor.send(Sci.SCI_UNDO) }
-        tool("Redo", "Redo") { editor.send(Sci.SCI_REDO) }
-        tool("Find", "Find") { findBar.open(withReplace = false) }
+        tool("Undo", "Undo") { if (hexShown != null) hexView.undo() else editor.send(Sci.SCI_UNDO) }
+        tool("Redo", "Redo") { if (hexShown != null) hexView.redo() else editor.send(Sci.SCI_REDO) }
+        tool("Find", "Find") { if (hexShown != null) hexFind() else findBar.open(withReplace = false) }
         moreButton = tool("⋮", "Menu") { showMainMenu() }
         root.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)))
         chromeBars.clear()
@@ -301,10 +315,18 @@ open class MainActivity : Activity() {
         }
         root.addView(tabRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38f)))
         chromeBars += tabRow
+        root.addView(compareBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36f)))
+        root.addView(hexBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36f)))
 
         // The editor, with room beside it for the Document Map.
         editorRow = LinearLayout(themed).apply { orientation = LinearLayout.HORIZONTAL }
         editorRow.addView(editor, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        // The Hex Editor's view takes the editor's place while a document is shown as bytes.
+        hexView = HexView(themed).apply { visibility = View.GONE }
+        hexView.onChanged = { hexChanged() }
+        hexView.onShortcut = { key, modifiers -> shortcut(key, modifiers) }
+        hexShown = null
+        editorRow.addView(hexView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         documentMap?.let { map ->
             (map.parent as? ViewGroup)?.removeView(map)
             editorRow.addView(map, LinearLayout.LayoutParams(dp(MAP_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
@@ -447,7 +469,20 @@ open class MainActivity : Activity() {
         showModifiers()
         fun press(label: String, code: Int) = key(label) {
             val modifiers = editor.softModifiers
-            if (modifiers == 0) editor.pressKey(code) else editor.shortcutKey(code, modifiers)
+            if (hexShown != null && modifiers == 0) {
+                hexView.key(
+                    when (code) {
+                        Sci.SCK_LEFT -> android.view.KeyEvent.KEYCODE_DPAD_LEFT
+                        Sci.SCK_RIGHT -> android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+                        Sci.SCK_UP -> android.view.KeyEvent.KEYCODE_DPAD_UP
+                        Sci.SCK_DOWN -> android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                        Sci.SCK_HOME -> android.view.KeyEvent.KEYCODE_MOVE_HOME
+                        Sci.SCK_END -> android.view.KeyEvent.KEYCODE_MOVE_END
+                        Sci.SCK_TAB -> android.view.KeyEvent.KEYCODE_TAB
+                        else -> 0
+                    },
+                )
+            } else if (modifiers == 0) editor.pressKey(code) else editor.shortcutKey(code, modifiers)
             releaseModifiers()
         }
         press("Tab", Sci.SCK_TAB)
@@ -539,6 +574,7 @@ open class MainActivity : Activity() {
                 'O'.code -> showMainMenu("Tools")
                 'M'.code -> showMainMenu("Macro")
                 'R'.code -> showMainMenu("Run")
+                'P'.code -> showMainMenu("Plugins")
                 'W'.code -> showMainMenu("Window")
                 else -> return false
             }
@@ -754,8 +790,11 @@ open class MainActivity : Activity() {
     private fun refreshTabs() {
         // The second view follows its document: gone with it, renamed with it.
         otherDoc?.let { if (it !in workspace.docs) closeOtherView() else otherTitle?.text = it.name }
-        shownDirty = workspace.isDirty(workspace.active)
-        tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, workspace.isDirty(it), it === workspace.active, it.colour, it.pinned) })
+        // A comparison is between the document on screen and the one below it; it ends when either goes.
+        comparing?.let { if (workspace.active !== it.newer || otherDoc !== it.older) endCompare() }
+        showHex()
+        shownDirty = unsaved(workspace.active)
+        tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, unsaved(it), it === workspace.active, it.colour, it.pinned) })
         updateStatus()
     }
 
@@ -763,7 +802,7 @@ open class MainActivity : Activity() {
         documentMap?.sync()
         otherView?.let { followScroll(editor, it, mainScroll, otherScroll) }
         completionFollowsCaret()
-        if (workspace.isDirty(workspace.active) != shownDirty) refreshTabs() else updateStatus()
+        if (unsaved(workspace.active) != shownDirty) refreshTabs() else updateStatus()
         workspace.lineCountMayHaveChanged()
         EditOps.highlightBraces(editor)
     }
@@ -879,12 +918,21 @@ open class MainActivity : Activity() {
     /** Saves a tab to its file, or asks where to put it if it has none yet. */
     private fun save(doc: Doc = workspace.active, then: (() -> Unit)? = null) {
         workspace.activate(doc)
+        hexSessions[doc]?.let { session ->
+            // Bytes read from the file go back to it exactly; a text shown as bytes is saved as the text it now is.
+            if (session.fromFile) return if (session.buffer.modified) saveHex(doc, session, then) else then?.invoke() ?: Unit
+            if (session.buffer.modified) applyHex(doc, session)
+        }
         val uri = doc.uri
         if (uri == null) saveAs(doc, copy = false, then = then) else write(doc, uri, doc.name, markSaved = true, then = then)
     }
 
     private fun saveAs(doc: Doc = workspace.active, copy: Boolean, then: (() -> Unit)? = null) {
         workspace.activate(doc)
+        hexSessions[doc]?.let { session ->
+            if (session.fromFile) return toast("Leave HEX view to save under another name")
+            if (session.buffer.modified) applyHex(doc, session)
+        }
         saveAsDoc = doc
         saveAsCopy = copy
         afterSave = then
@@ -1096,6 +1144,8 @@ open class MainActivity : Activity() {
 
     /** Closes a tab, first asking about unsaved changes as Notepad++ does. */
     private fun requestClose(doc: Doc, then: (() -> Unit)? = null) {
+        // Bytes changed in HEX view are settled first: saved, dropped, or put back into the text.
+        if (hexSessions.containsKey(doc)) return leaveHex(doc) { requestClose(doc, then) }
         if (!workspace.isDirty(doc)) {
             rememberRecent(doc)
             workspace.close(doc)
@@ -1177,6 +1227,7 @@ open class MainActivity : Activity() {
         sub("Tools") { toolsMenu() }
         sub("Macro") { macroMenu() }
         sub("Run") { item("Run...") { runDialog() } }
+        sub("Plugins") { pluginsMenu() }
         sub("Window") { windowMenu() }
         sub("?") { helpMenu() }
     }
@@ -3378,6 +3429,7 @@ open class MainActivity : Activity() {
     }
 
     internal fun closeOtherView() {
+        if (comparing != null) return endCompare()
         val view = otherView ?: return
         otherPane?.let { splitArea.removeView(it) }
         otherPane = null
@@ -3463,7 +3515,10 @@ open class MainActivity : Activity() {
     private fun followScroll(moved: ScintillaView, follower: ScintillaView, was: LongArray, followerWas: LongArray) {
         val line = moved.send(Sci.SCI_GETFIRSTVISIBLELINE)
         val x = moved.send(Sci.SCI_GETXOFFSET)
-        if (syncVertical && line != was[0]) follower.send(Sci.SCI_LINESCROLL, 0, line - was[0])
+        if (comparing != null) {
+            // Compared texts are padded to the same height, so the same row number is the same place in both.
+            if (line != was[0]) follower.send(Sci.SCI_SETFIRSTVISIBLELINE, line)
+        } else if (syncVertical && line != was[0]) follower.send(Sci.SCI_LINESCROLL, 0, line - was[0])
         if (syncHorizontal && x != was[1]) follower.send(Sci.SCI_SETXOFFSET, (follower.send(Sci.SCI_GETXOFFSET) + x - was[1]).coerceAtLeast(0))
         was[0] = line
         was[1] = x
@@ -3487,6 +3542,482 @@ open class MainActivity : Activity() {
         } catch (e: Exception) {
             toast("This device cannot open a second window")
         }
+    }
+
+    // endregion
+
+    // region Plugins: Hex Editor
+
+    // Notepad++'s HEX-Editor plugin, built in. A saved file is shown as the bytes stored in it and saved back
+    // byte for byte, so files that are not text come through whole. A document with unsaved text is shown as the
+    // bytes its text would be saved as, and what is typed there goes back into the text.
+    private class HexSession(var buffer: HexBuffer, val fromFile: Boolean) {
+        var cursor = 0
+        var inText = false
+    }
+
+    private val hexSessions = HashMap<Doc, HexSession>()
+    private var hexShown: HexSession? = null
+    internal lateinit var hexView: HexView
+    private lateinit var hexBarView: LinearLayout
+    private lateinit var hexLabel: TextView
+    private var hexPattern = ""
+    internal val hexViewShown: Boolean get() = hexShown != null
+
+    /** Unsaved text, or unsaved bytes in HEX view. */
+    private fun unsaved(doc: Doc) = workspace.isDirty(doc) || hexSessions[doc]?.buffer?.modified == true
+
+    private fun hexBar(): View {
+        hexLabel = TextView(themed).apply {
+            contentDescription = "Hex status"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(palette.chromeText)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10f), 0, dp(6f), 0)
+        }
+        hexBarView = LinearLayout(themed).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(palette.chrome)
+            visibility = View.GONE
+            addView(hexLabel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            for ((label, description, action) in listOf(
+                Triple("Go", "Go to offset") { hexGoTo() },
+                Triple("+", "Insert byte") { hexView.insertByte() },
+                Triple("\u2212", "Delete byte") { hexView.deleteByte() },
+                Triple("\u2715", "Leave HEX view") { setHexView(false) },
+            )) {
+                addView(barButton(label, description) { action() }, LinearLayout.LayoutParams(dp(42f), ViewGroup.LayoutParams.MATCH_PARENT))
+            }
+        }
+        return hexBarView
+    }
+
+    /** Shows the bytes of the tab on screen if it is in HEX view, and the editor if it is not. */
+    private fun showHex() {
+        hexSessions.keys.retainAll(workspace.docs.toSet())
+        val session = hexSessions[workspace.active]
+        val was = hexView.visibility == View.VISIBLE
+        if (session != null && (hexShown !== session || hexView.buffer !== session.buffer)) {
+            // Not shown yet while it is set up, so that the place kept for it is not overwritten.
+            hexShown = null
+            styleHex()
+            hexView.bytesPerRowWanted = prefs.getInt("hexBytesPerRow", 0)
+            hexView.buffer = session.buffer
+            hexView.setCursor(session.cursor, session.inText)
+        }
+        hexShown = session
+        hexView.visibility = if (session != null) View.VISIBLE else View.GONE
+        editor.visibility = if (session != null) View.GONE else View.VISIBLE
+        hexBarView.visibility = hexView.visibility
+        if (session != null) {
+            showHexStatus()
+            if (!was) hexView.requestFocus()
+        } else if (was) {
+            editor.requestFocus()
+        }
+    }
+
+    /** The bytes are shown in the editor's own colours and size. */
+    private fun styleHex() {
+        fun rgb(bgr: Long) = 0xFF000000.toInt() or ((bgr and 0xFF) shl 16).toInt() or (bgr and 0xFF00).toInt() or ((bgr shr 16) and 0xFF).toInt()
+        hexView.setColours(
+            rgb(editor.send(Sci.SCI_STYLEGETFORE, Sci.STYLE_DEFAULT.toLong())), rgb(editor.send(Sci.SCI_STYLEGETBACK, Sci.STYLE_DEFAULT.toLong())), palette.accent,
+        )
+        hexView.setTextSize(fontSize.toFloat())
+    }
+
+    private fun showHexStatus() {
+        val session = hexShown ?: return
+        val at = hexView.cursor
+        hexLabel.text = "Offset 0x%08X (%d) \u00B7 %d bytes \u00B7 %s%s".format(
+            at, at, session.buffer.size, if (hexView.inText) "text" else "hex", if (session.buffer.modified) " \u00B7 modified" else "",
+        )
+    }
+
+    private fun hexChanged() {
+        val session = hexShown ?: return
+        session.cursor = hexView.cursor
+        session.inText = hexView.inText
+        if (unsaved(workspace.active) != shownDirty) refreshTabs() else showHexStatus()
+    }
+
+    /** Plugins > Hex Editor > View in HEX. */
+    internal fun setHexView(on: Boolean) {
+        val doc = workspace.active
+        if (!on) return leaveHex(doc)
+        if (hexSessions.containsKey(doc)) return
+        if (comparing != null) endCompare()
+        val uri = doc.uri
+        if (uri == null || workspace.isDirty(doc)) {
+            hexSessions[doc] = HexSession(HexBuffer(TextEncodings.fromUtf8(workspace.bytesForSaving(), doc.encoding)), fromFile = false)
+            return refreshTabs()
+        }
+        io.execute {
+            val result = runCatching { FileIo.readBytes(this, uri, HEX_MAX_BYTES) }
+            ui.post {
+                if (destroyed) return@post
+                result.onSuccess {
+                    if (doc in workspace.docs && !hexSessions.containsKey(doc)) {
+                        hexSessions[doc] = HexSession(HexBuffer(it), fromFile = true)
+                        refreshTabs()
+                    }
+                }.onFailure { toast("Cannot show the file in HEX: ${it.message ?: it.javaClass.simpleName}") }
+            }
+        }
+    }
+
+    /** Back to the text. Changed bytes of a file are saved or dropped first, as the user says. */
+    private fun leaveHex(doc: Doc, then: (() -> Unit)? = null) {
+        val session = hexSessions[doc]
+        fun done() {
+            hexSessions.remove(doc)
+            refreshTabs()
+            then?.invoke()
+        }
+        if (session == null || !session.buffer.modified) return done()
+        workspace.activate(doc)
+        if (!session.fromFile) {
+            applyHex(doc, session)
+            return done()
+        }
+        AlertDialog.Builder(themed)
+            .setTitle("Save")
+            .setMessage("Save the bytes changed in HEX view to \"${doc.name}\"?")
+            .setPositiveButton("Yes") { _, _ -> saveHex(doc, session) { done() } }
+            .setNegativeButton("No") { _, _ -> done() }
+            .setNeutralButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Puts the bytes back into the active document as text, as one step that Undo takes back. */
+    private fun applyHex(doc: Doc, session: HexSession) {
+        val bytes = session.buffer.toByteArray()
+        val utf8 = TextEncodings.toUtf8(bytes, doc.encoding)
+        if (editor.send(Sci.SCI_GETREADONLY) != 0L) {
+            toast("The document is read-only; the changed bytes were not kept")
+        } else {
+            editor.send(Sci.SCI_SETTARGETRANGE, 0, editor.send(Sci.SCI_GETLENGTH))
+            editor.sendBytes(Sci.SCI_REPLACETARGET, utf8.size.toLong(), utf8)
+        }
+        // What the text holds now is what is shown from here on.
+        val now = TextEncodings.fromUtf8(workspace.bytesForSaving(), doc.encoding)
+        if (!now.contentEquals(bytes)) toast("Some bytes are not ${doc.encoding.label} text and could not be kept as they were")
+        session.buffer = HexBuffer(now)
+        session.cursor = session.cursor.coerceAtMost(now.size)
+    }
+
+    /** Writes the bytes to the document's file as they are, then reads the text again from them. */
+    private fun saveHex(doc: Doc, session: HexSession, then: (() -> Unit)?) {
+        val uri = doc.uri ?: return
+        val buffer = session.buffer
+        val bytes = buffer.toByteArray()
+        val encoding = doc.encoding
+        io.execute {
+            val result = runCatching {
+                FileIo.write(this, uri, bytes)
+                val utf8 = TextEncodings.toUtf8(bytes, encoding)
+                LoadedFile(doc.name, utf8, encoding, Eol.detect(utf8))
+            }
+            ui.post {
+                if (destroyed) return@post
+                result.onSuccess { file ->
+                    if (doc in workspace.docs) {
+                        workspace.activate(doc)
+                        workspace.reloaded(file)
+                        workspace.markSaved(doc, uri, doc.name)
+                    }
+                    // Unless more was typed while the file was being written.
+                    if (session.buffer === buffer && buffer.toByteArray().contentEquals(bytes)) buffer.markSaved()
+                    refreshTabs()
+                    toast("Saved ${doc.name}")
+                    then?.invoke()
+                }.onFailure {
+                    AlertDialog.Builder(themed)
+                        .setTitle("Save failed")
+                        .setMessage("${it.message ?: it.javaClass.simpleName}\n\nThe file may be read-only for this app.")
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun hexGoTo() {
+        askText("Go to Offset", "Offset", "0x%X".format(hexView.cursor)) { text ->
+            val offset = HexBuffer.offset(text) ?: return@askText toast("Write the offset as a number, or in hex as 0x1F")
+            hexView.setCursor(offset)
+        }
+    }
+
+    private fun hexFind() {
+        askText("Find Bytes", "Bytes to find", hexPattern) { text ->
+            hexPattern = text
+            hexFindNext()
+        }
+    }
+
+    private fun hexFindNext() {
+        val pattern = HexBuffer.pattern(hexPattern) ?: return toast("Write bytes in hex, such as 4A 6F, or a text in \"quotes\"")
+        val at = hexView.buffer.find(pattern, hexView.cursor + 1)
+        if (at < 0) toast("Not found") else hexView.setCursor(at)
+    }
+
+    // endregion
+
+    // region Plugins: Compare
+
+    // Notepad++'s Compare plugin, built in. The document on screen is the new text; the one it is compared
+    // with goes in the second view below as the old text. Lines only in one are tinted green or red, changed
+    // lines yellow with the changed characters marked, and blank rows keep the two level.
+    private class Comparison(val newer: Doc, val older: Doc, val temporary: Doc?, val wrapWas: Long) {
+        var places: List<Int> = emptyList()
+        var differences = 0
+        var compared = 0
+    }
+
+    private var comparing: Comparison? = null
+    internal val comparisonDifferences: Int get() = comparing?.differences ?: -1
+    private var compareFirst: Doc? = null
+    private var compareRun = 0
+    private lateinit var compareBarView: LinearLayout
+    private lateinit var compareLabel: TextView
+
+    private fun compareBar(): View {
+        compareLabel = TextView(themed).apply {
+            contentDescription = "Compare result"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(palette.chromeText)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10f), 0, dp(6f), 0)
+        }
+        compareBarView = LinearLayout(themed).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(palette.chrome)
+            visibility = if (comparing != null) View.VISIBLE else View.GONE
+            addView(compareLabel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            for ((label, description, action) in listOf(
+                Triple("\u21C8", "First difference") { compareGo { sci, places -> Compare.first(sci, places) } },
+                Triple("\u25B2", "Previous difference") { compareGo { sci, places -> Compare.go(sci, places, forward = false) } },
+                Triple("\u25BC", "Next difference") { compareGo { sci, places -> Compare.go(sci, places, forward = true) } },
+                Triple("\u21CA", "Last difference") { compareGo { sci, places -> Compare.last(sci, places) } },
+                Triple("\u2715", "Clear compare") { endCompare() },
+            )) {
+                addView(barButton(label, description) { action() }, LinearLayout.LayoutParams(dp(42f), ViewGroup.LayoutParams.MATCH_PARENT))
+            }
+        }
+        showCompareResult()
+        return compareBarView
+    }
+
+    private fun showCompareResult() {
+        val session = comparing
+        compareBarView.visibility = if (session != null) View.VISIBLE else View.GONE
+        if (session == null) return
+        compareLabel.text = when (session.differences) {
+            0 -> "No differences \u00B7 ${session.older.name}"
+            1 -> "1 difference \u00B7 ${session.older.name}"
+            else -> "${session.differences} differences \u00B7 ${session.older.name}"
+        }
+    }
+
+    private fun compareOptions() = DiffOptions(prefs.getBoolean("compareIgnoreCase", false), prefs.getBoolean("compareIgnoreSpaces", false))
+
+    private fun MenuSpec.pluginsMenu() {
+        sub("Hex Editor") {
+            val shown = hexSessions.containsKey(workspace.active)
+            item("View in HEX", checked = shown) { setHexView(!shown) }
+            item("Go to Offset...", enabled = shown) { hexGoTo() }
+            item("Find Bytes...", enabled = shown) { hexFind() }
+            item("Find Next Bytes", enabled = shown && hexPattern.isNotEmpty()) { hexFindNext() }
+            item("Insert Byte", enabled = shown) { hexView.insertByte() }
+            item("Delete Byte", enabled = shown) { hexView.deleteByte() }
+            sub("Bytes per Row") {
+                val wanted = prefs.getInt("hexBytesPerRow", 0)
+                for ((label, count) in listOf("Fit Width" to 0, "4" to 4, "8" to 8, "16" to 16)) {
+                    item(label, checked = wanted == count) {
+                        prefs.edit().putInt("hexBytesPerRow", count).apply()
+                        hexView.bytesPerRowWanted = count
+                    }
+                }
+            }
+        }
+        sub("Compare") {
+            val docs = workspace.docs
+            item("Set as First to Compare", checked = compareFirst === workspace.active) {
+                compareFirst = if (compareFirst === workspace.active) null else workspace.active
+            }
+            item("Compare", enabled = docs.size > 1) { compareWithNeighbour() }
+            item("Compare to Clipboard") { compareToClipboard() }
+            item("Diff since Last Save", enabled = workspace.active.uri != null) { compareToSaved() }
+            item("Clear Active Compare", enabled = comparing != null) { endCompare() }
+            item("Previous", enabled = comparing != null) { compareGo { sci, places -> Compare.go(sci, places, forward = false) } }
+            item("Next", enabled = comparing != null) { compareGo { sci, places -> Compare.go(sci, places, forward = true) } }
+            item("First", enabled = comparing != null) { compareGo { sci, places -> Compare.first(sci, places) } }
+            item("Last", enabled = comparing != null) { compareGo { sci, places -> Compare.last(sci, places) } }
+            for ((label, key) in listOf(
+                "Ignore Case" to "compareIgnoreCase", "Ignore Spaces" to "compareIgnoreSpaces", "Show Only Differences" to "compareOnlyDiffs",
+            )) {
+                val on = prefs.getBoolean(key, false)
+                item(label, checked = on) {
+                    prefs.edit().putBoolean(key, !on).apply()
+                    runCompare(land = false)
+                }
+            }
+        }
+    }
+
+    /** Plugins > Compare > Compare: with the document set as first, or else with the tab next to this one. */
+    private fun compareWithNeighbour() {
+        val docs = workspace.docs
+        val current = workspace.active
+        val first = compareFirst?.takeIf { it in docs && it !== current }
+        val index = docs.indexOf(current)
+        val other = first ?: docs.getOrNull(if (index > 0) index - 1 else index + 1) ?: return toast("Open a second document to compare this one with")
+        compareFirst = null
+        startCompare(current, other, temporary = null)
+    }
+
+    /** A document that holds a text to compare with and nothing else: not saved anywhere, gone with the comparison. */
+    private fun temporaryDocument(name: String, utf8: ByteArray): Doc {
+        val back = workspace.active
+        val language = back.language
+        val temporary = workspace.newDocument()
+        editor.sendBytes(Sci.SCI_ADDTEXT, utf8.size.toLong(), utf8)
+        editor.send(Sci.SCI_EMPTYUNDOBUFFER)
+        editor.send(Sci.SCI_SETSAVEPOINT)
+        temporary.name = name
+        temporary.untitledNumber = 0
+        workspace.setLanguage(language)
+        workspace.activate(back)
+        return temporary
+    }
+
+    private fun compareToClipboard() {
+        val text = editor.getClipboard()
+        if (text.isEmpty()) return toast("The clipboard holds no text")
+        val current = workspace.active
+        startCompare(current, temporaryDocument("Clipboard", text.toByteArray(Charsets.UTF_8)), temporary = true)
+    }
+
+    /** Plugins > Compare > Diff since Last Save: the document against the file it was read from. */
+    private fun compareToSaved() {
+        val current = workspace.active
+        val uri = current.uri ?: return
+        if (!workspace.isDirty(current)) return toast("Nothing has changed since the last save")
+        io.execute {
+            val file = runCatching { FileIo.read(this, uri, current.encoding) }.getOrNull()
+            ui.post {
+                if (destroyed || workspace.active !== current) return@post
+                if (file == null) toast("Cannot read the saved file")
+                else startCompare(current, temporaryDocument("${current.name} (saved)", file.utf8), temporary = true)
+            }
+        }
+    }
+
+    private fun startCompare(newer: Doc, older: Doc, temporary: Boolean?) {
+        if (hexSessions.containsKey(newer)) return toast("Leave HEX view to compare this document")
+        if (comparing != null) endCompare()
+        if (workspace.active !== newer) workspace.activate(newer)
+        showOtherView(older)
+        val view = otherView ?: return
+        // Wrapped lines would not stay level, so wrapping is off while comparing.
+        val session = Comparison(newer, older, older.takeIf { temporary == true }, editor.send(Sci.SCI_GETWRAPMODE))
+        comparing = session
+        editor.send(Sci.SCI_SETWRAPMODE, Sci.SC_WRAP_NONE.toLong())
+        view.send(Sci.SCI_SETWRAPMODE, Sci.SC_WRAP_NONE.toLong())
+        runCompare(land = true)
+    }
+
+    /** Works out the differences in the background and shows them. With [land], the view goes to the first one. */
+    private fun runCompare(land: Boolean) {
+        val session = comparing ?: return
+        val view = otherView ?: return
+        val run = ++compareRun
+        val newLines = Compare.lines(editor)
+        val oldLines = Compare.lines(view)
+        val options = compareOptions()
+        val stamp = newLines.hashCode() * 31 + oldLines.hashCode() + options.hashCode()
+        io.execute {
+            val rows = Diff.rows(oldLines, newLines, options)
+            ui.post {
+                val other = otherView
+                if (destroyed || run != compareRun || comparing !== session || other == null) return@post
+                Compare.setup(editor, palette.dark)
+                Compare.setup(other, palette.dark)
+                Compare.show(other, editor, rows, oldLines, newLines)
+                if (prefs.getBoolean("compareOnlyDiffs", false)) {
+                    Compare.hideSame(editor)
+                    Compare.hideSame(other)
+                }
+                session.places = Compare.places(rows)
+                session.differences = Diff.differences(rows)
+                session.compared = stamp
+                showCompareResult()
+                if (land) {
+                    if (!Compare.first(editor, session.places)) editor.send(Sci.SCI_SETFIRSTVISIBLELINE, 0)
+                }
+                other.send(Sci.SCI_SETFIRSTVISIBLELINE, editor.send(Sci.SCI_GETFIRSTVISIBLELINE))
+                rememberScroll(editor, mainScroll)
+                rememberScroll(other, otherScroll)
+                menuSheet?.refresh()
+            }
+        }
+    }
+
+    private val compareAgain = Runnable {
+        val session = comparing ?: return@Runnable
+        val view = otherView ?: return@Runnable
+        // Marking the differences is a change of sorts too; only a change of the text calls for comparing again.
+        val stamp = Compare.lines(editor).hashCode() * 31 + Compare.lines(view).hashCode() + compareOptions().hashCode()
+        if (stamp != session.compared) runCompare(land = false)
+    }
+
+    /** While a comparison is shown it follows the typing, a moment after the last key. */
+    private fun compareAgainSoon() {
+        if (comparing == null) return
+        ui.removeCallbacks(compareAgain)
+        ui.postDelayed(compareAgain, COMPARE_AGAIN_MS)
+    }
+
+    private fun compareGo(move: (ScintillaView, List<Int>) -> Boolean) {
+        val session = comparing ?: return
+        if (!move(editor, session.places)) toast(if (session.places.isEmpty()) "There are no differences" else "No more differences that way")
+        updateStatus()
+    }
+
+    /** Runs something on a document through whichever view shows it, or through the unseen one if none does. */
+    private fun withDocument(doc: Doc, action: (ScintillaView) -> Unit) {
+        when {
+            doc !in workspace.docs -> {}
+            doc === workspace.active -> action(editor)
+            doc === otherDoc && otherView != null -> action(otherView!!)
+            else -> {
+                val unseen = searcher()
+                unseen.send(Sci.SCI_SETDOCPOINTER, 0, doc.sciDoc)
+                action(unseen)
+                unseen.send(Sci.SCI_SETDOCPOINTER, 0, 0)
+            }
+        }
+    }
+
+    /** Plugins > Compare > Clear Active Compare: takes the marks away and closes the second view. */
+    internal fun endCompare() {
+        val session = comparing ?: return
+        comparing = null
+        compareRun++
+        ui.removeCallbacks(compareAgain)
+        withDocument(session.newer) { Compare.clear(it) }
+        withDocument(session.older) { Compare.clear(it) }
+        if (session.newer === workspace.active) editor.send(Sci.SCI_SETWRAPMODE, session.wrapWas)
+        closeOtherView()
+        session.temporary?.let { if (it in workspace.docs) workspace.close(it) }
+        showCompareResult()
     }
 
     // endregion
@@ -4073,11 +4604,15 @@ open class MainActivity : Activity() {
         const val PROJECT_PANELS = 3
         const val PANEL_DOCUMENTS = "Documents"
         const val MAP_WIDTH_DP = 72f
+
+        /** The largest file HEX view takes: its bytes are all held in memory. */
+        const val HEX_MAX_BYTES = 16L * 1024 * 1024
         const val MAP_FONT_SIZE = 3
         const val PANEL_FOLDERS = "Folders"
         const val PANEL_FUNCTIONS = "Functions"
         const val MAX_FUNCTION_LIST_BYTES = 3L * 1024 * 1024
         const val MAX_COMPLETION_BYTES = 512L * 1024
+        const val COMPARE_AGAIN_MS = 700L
 
         /** Auto-completion files whose names differ from the language's. */
         val API_FILES = mapOf("javascript.js" to "javascript", "coffeescript" to "coffee", "baanc" to "BaanC")
@@ -4179,6 +4714,16 @@ open class MainActivity : Activity() {
             put("Macro > Playback", key(CTRL or SHIFT, 'P'.code))
             put("Run > Run...", key(0, f(5)))
             put("View > Focus on Another View", key(0, f(8)))
+            put("Plugins > Hex Editor > View in HEX", key(CTRL or ALT or SHIFT, 'H'.code))
+            put("Plugins > Compare > Set as First to Compare", key(CTRL or ALT, '1'.code))
+            put("Plugins > Compare > Compare", key(CTRL or ALT, 'C'.code))
+            put("Plugins > Compare > Compare to Clipboard", key(CTRL or ALT, 'M'.code))
+            put("Plugins > Compare > Diff since Last Save", key(CTRL or ALT, 'D'.code))
+            put("Plugins > Compare > Clear Active Compare", key(CTRL or ALT, 'X'.code))
+            put("Plugins > Compare > Previous", key(ALT, Sci.SCK_PRIOR))
+            put("Plugins > Compare > Next", key(ALT, Sci.SCK_NEXT))
+            put("Plugins > Compare > First", key(CTRL or ALT, Sci.SCK_PRIOR))
+            put("Plugins > Compare > Last", key(CTRL or ALT, Sci.SCK_NEXT))
             put("Edit > Auto-Completion > Function Completion", key(CTRL, ' '.code))
             put("Edit > Auto-Completion > Word Completion", key(CTRL, Sci.SCK_RETURN))
             put("Edit > Auto-Completion > Function Parameters Hint", key(CTRL or SHIFT, ' '.code))

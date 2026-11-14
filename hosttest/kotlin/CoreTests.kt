@@ -1,7 +1,12 @@
 package host
 
 import io.github.revelationnow.pocketpadpp.core.ApiIndex
+import io.github.revelationnow.pocketpadpp.core.Compare
 import io.github.revelationnow.pocketpadpp.core.Completion
+import io.github.revelationnow.pocketpadpp.core.Diff
+import io.github.revelationnow.pocketpadpp.core.DiffKind
+import io.github.revelationnow.pocketpadpp.core.DiffOptions
+import io.github.revelationnow.pocketpadpp.core.DiffRow
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.EditorOptions
 import io.github.revelationnow.pocketpadpp.core.BoostPattern
@@ -15,6 +20,7 @@ import io.github.revelationnow.pocketpadpp.core.StyleOverrides
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
+import io.github.revelationnow.pocketpadpp.core.HexBuffer
 import io.github.revelationnow.pocketpadpp.core.Invisibles
 import io.github.revelationnow.pocketpadpp.core.LanguageSetup
 import io.github.revelationnow.pocketpadpp.core.MacroStep
@@ -1083,6 +1089,179 @@ private fun testUserLanguages(assets: File, registry: LanguageRegistry, theme: N
     ok(UserLanguages.template("x", "").split("<Keywords ").size - 1 == 28, "the template names all 28 lists")
 }
 
+private fun testCompare() {
+    fun show(rows: List<DiffRow>) = rows.joinToString(" ") { row ->
+        when (row.kind) {
+            DiffKind.SAME -> "=${row.old}"
+            DiffKind.CHANGED -> "~${row.old}/${row.new}"
+            DiffKind.REMOVED -> "-${row.old}"
+            DiffKind.ADDED -> "+${row.new}"
+        }
+    }
+    val old = listOf("alpha", "beta", "gamma", "delta", "epsilon")
+    eq("=0 =1 =2 =3 =4", show(Diff.rows(old, old)), "the same text has no differences")
+    eq("=0 =1 +2 =2 =3 =4", show(Diff.rows(old, listOf("alpha", "beta", "NEW", "gamma", "delta", "epsilon"))), "an added line")
+    eq("=0 -1 =2 =3 =4", show(Diff.rows(old, listOf("alpha", "gamma", "delta", "epsilon"))), "a removed line")
+    eq("=0 =1 ~2/2 =3 =4", show(Diff.rows(old, listOf("alpha", "beta", "gamma ray", "delta", "epsilon"))), "a changed line is paired with what it became")
+    eq("=0 =1 -2 +2 =3 =4", show(Diff.rows(old, listOf("alpha", "beta", "XYZ 123", "delta", "epsilon"))), "a line replaced by an unrelated one is a removal and an addition")
+    eq("+0 +1", show(Diff.rows(emptyList(), listOf("a", "b"))), "everything added to an empty text")
+    eq("-0 -1", show(Diff.rows(listOf("a", "b"), emptyList())), "everything removed")
+    eq("=0 =1", show(Diff.rows(listOf("Hello World", "x  y"), listOf("hello world", "xy"), DiffOptions(ignoreCase = true, ignoreSpaces = true))), "case and spaces can be overlooked")
+    eq("~0/0 ~1/1", show(Diff.rows(listOf("Hello World", "x  y"), listOf("hello world", "xy"))), "and count otherwise")
+    eq(2, Diff.differences(Diff.rows(old, listOf("alpha", "B", "gamma", "delta", "E", "F"))), "separate places that differ are counted")
+
+    // Whatever the texts, following the steps turns the one into the other, and no shorter way was missed for small cases.
+    val random = java.util.Random(7)
+    var sound = true
+    repeat(300) {
+        val a = IntArray(random.nextInt(30)) { random.nextInt(4) }
+        val b = IntArray(random.nextInt(30)) { random.nextInt(4) }
+        val steps = Diff.script(a, b)
+        val made = ArrayList<Int>()
+        var i = 0
+        var j = 0
+        var kept = 0
+        for (step in steps) {
+            when (step.toInt()) {
+                0 -> { if (a[i] != b[j]) sound = false; made += a[i]; i++; j++; kept++ }
+                1 -> i++
+                else -> { made += b[j]; j++ }
+            }
+        }
+        if (i != a.size || j != b.size || made != b.toList()) sound = false
+        // The longest common subsequence, the slow and sure way.
+        val table = Array(a.size + 1) { IntArray(b.size + 1) }
+        for (x in a.indices) for (y in b.indices) {
+            table[x + 1][y + 1] = if (a[x] == b[y]) table[x][y] + 1 else maxOf(table[x][y + 1], table[x + 1][y])
+        }
+        if (kept != table[a.size][b.size]) sound = false
+    }
+    ok(sound, "random texts: the steps rebuild the new text and keep as much as can be kept")
+    val big = IntArray(6000) { it }
+    val bigger = IntArray(6000) { it + 1_000_000 }
+    eq(12000, Diff.script(big, bigger).size, "texts with nothing in common are given up on quickly")
+
+    eq(listOf(8..8) to listOf(8..10), Diff.changedParts("total = 100", "total = 2,500"), "the characters that changed in a line")
+    eq(emptyList<IntRange>() to listOf(5..10), Diff.changedParts("hello", "hello world"), "characters only added")
+
+    // Shown in two views.
+    val left = HostSci()
+    val right = HostSci()
+    left.text = "one\ntwo\nthree\nfour\nfive\n"
+    right.text = "one\n2\ntwo and a half\nthree\nfive\nsix\nseven\n"
+    val oldLines = Compare.lines(left)
+    val newLines = Compare.lines(right)
+    eq(listOf("one", "two", "three", "four", "five"), oldLines, "lines of a document, without the empty one after the last line break")
+    val rows = Diff.rows(oldLines, newLines)
+    Compare.setup(left, dark = false)
+    Compare.setup(right, dark = true)
+    Compare.show(left, right, rows, oldLines, newLines)
+    fun marks(sci: HostSci, marker: Int) = (0 until sci.send(Sci.SCI_GETLINECOUNT)).filter { sci.send(Sci.SCI_MARKERGET, it) and (1L shl marker) != 0L }
+    eq(listOf(1L), marks(left, Compare.CHANGED), "changed line on the old side")
+    eq(listOf(2L), marks(right, Compare.CHANGED), "changed line on the new side")
+    eq(listOf(3L), marks(left, Compare.REMOVED), "removed line on the old side")
+    eq(listOf(1L, 5L, 6L), marks(right, Compare.ADDED), "added lines on the new side")
+    fun height(sci: HostSci) = (0 until sci.send(Sci.SCI_GETLINECOUNT)).sumOf { 1 + sci.send(Sci.SCI_ANNOTATIONGETLINES, it) }
+    eq(height(right), height(left), "blank rows make both sides the same height")
+    eq(1L, left.send(Sci.SCI_ANNOTATIONGETLINES, 0), "a blank row on the old side where the new one has a line more")
+    eq(1L, right.send(Sci.SCI_ANNOTATIONGETLINES, 3), "a blank row on the new side where a line was removed")
+    eq(2L, left.send(Sci.SCI_ANNOTATIONGETLINES, 4), "two blank rows for two lines added at the end")
+    ok(right.send(Sci.SCI_INDICATORVALUEAT, Compare.INDICATOR.toLong(), right.send(Sci.SCI_POSITIONFROMLINE, 2) + 4) != 0L, "the changed characters are marked")
+    eq(0L, right.send(Sci.SCI_INDICATORVALUEAT, Compare.INDICATOR.toLong(), right.send(Sci.SCI_POSITIONFROMLINE, 2) + 1), "the unchanged ones are not")
+
+    // Going from one difference to the next.
+    val places = Compare.places(rows)
+    eq(listOf(1, 3, 5), places, "where the differences are in the new text; a removal counts at the line it follows")
+    fun line(sci: HostSci) = sci.send(Sci.SCI_LINEFROMPOSITION, sci.send(Sci.SCI_GETCURRENTPOS))
+    right.send(Sci.SCI_GOTOLINE, 0)
+    ok(Compare.go(right, places, forward = true) && line(right) == 1L, "next difference")
+    ok(Compare.go(right, places, forward = true) && line(right) == 3L, "the one after")
+    ok(Compare.go(right, places, forward = true) && line(right) == 5L, "the last one")
+    ok(!Compare.go(right, places, forward = true), "no difference after the last")
+    ok(Compare.go(right, places, forward = false) && line(right) == 3L, "previous difference")
+    ok(Compare.first(right, places) && line(right) == 1L, "first difference")
+    ok(Compare.last(right, places) && line(right) == 5L, "last difference")
+    eq(listOf(0), Compare.places(Diff.rows(listOf("gone", "kept"), listOf("kept"))), "a removal at the very top counts at the first line")
+    eq(emptyList<Int>(), Compare.places(Diff.rows(oldLines, oldLines)), "no differences, no places")
+
+    // Show only differences, and clearing.
+    val longOld = (1..40).map { "line $it" }
+    val longNew = longOld.toMutableList().also { it[20] = "line twenty-one" }
+    val a = HostSci()
+    val b = HostSci()
+    a.text = longOld.joinToString("\n")
+    b.text = longNew.joinToString("\n")
+    Compare.show(a, b, Diff.rows(longOld, longNew), longOld, longNew)
+    Compare.hideSame(b)
+    eq(1L, b.send(Sci.SCI_GETLINEVISIBLE, 20), "the changed line stays in view")
+    eq(1L, b.send(Sci.SCI_GETLINEVISIBLE, 19), "with a line of what is around it")
+    eq(0L, b.send(Sci.SCI_GETLINEVISIBLE, 10), "lines that are the same are hidden")
+    eq(0L, b.send(Sci.SCI_GETLINEVISIBLE, 39), "to the end")
+    Compare.clear(b)
+    Compare.clear(right)
+    eq(1L, b.send(Sci.SCI_GETLINEVISIBLE, 10), "clearing shows every line again")
+    eq(emptyList<Long>(), marks(right, Compare.ADDED), "clearing removes the marks")
+    eq(0L, right.send(Sci.SCI_ANNOTATIONGETLINES, 3), "and the blank rows")
+}
+
+private fun testHexBuffer() {
+    fun bytes(vararg values: Int) = ByteArray(values.size) { values[it].toByte() }
+    fun show(buffer: HexBuffer) = buffer.toByteArray().joinToString(" ") { HexBuffer.hex(it.toInt() and 0xFF) }
+    val buffer = HexBuffer(bytes(0x48, 0x65, 0x00, 0xFF))
+    eq("48 65 00 FF", show(buffer), "bytes as hex")
+    ok(!buffer.modified && !buffer.canUndo, "untouched at first")
+    buffer.overwrite(1, 0x45)
+    eq("48 45 00 FF", show(buffer), "a byte overwritten")
+    buffer.typeDigit(0, high = true, digit = 0xA)
+    buffer.typeDigit(0, high = false, digit = 0x7)
+    eq("A7 45 00 FF", show(buffer), "a byte typed as two hex digits")
+    buffer.insert(2, bytes(0x01, 0x02))
+    eq("A7 45 01 02 00 FF", show(buffer), "bytes inserted")
+    buffer.delete(4)
+    eq("A7 45 01 02 FF", show(buffer), "a byte deleted")
+    buffer.overwrite(5, 0x0A)
+    eq("A7 45 01 02 FF 0A", show(buffer), "overwriting at the end adds a byte")
+    ok(buffer.modified, "changed since it was read")
+    eq(5, buffer.undo(), "undo says where the change was")
+    eq(4, buffer.undo(), "and the one before")
+    eq("A7 45 01 02 00 FF", show(buffer), "two changes undone")
+    eq(4, buffer.redo(), "redo")
+    eq("A7 45 01 02 FF", show(buffer), "one change redone")
+    while (buffer.undo() >= 0) { /* back to the start */ }
+    eq("48 65 00 FF", show(buffer), "every change undone gives the bytes that were read")
+    ok(!buffer.modified, "and that counts as unchanged")
+    buffer.overwrite(0, 0x00)
+    buffer.markSaved()
+    ok(!buffer.modified, "saved")
+    buffer.undo()
+    ok(buffer.modified, "undoing past the save is a change")
+    buffer.overwrite(0, 0x11)
+    ok(buffer.modified && !buffer.canRedo, "a new change after an undo leaves the saved state out of reach")
+    buffer.delete(9)
+    buffer.insert(9, bytes(1))
+    buffer.overwrite(9, 1)
+    eq("11 65 00 FF", show(buffer), "changes outside the bytes are ignored")
+    val grown = HexBuffer(ByteArray(0))
+    grown.insert(0, ByteArray(1000) { it.toByte() })
+    eq(1000 to 231, grown.size to grown[999], "a buffer grows as needed")
+
+    val hay = HexBuffer(bytes(0xDE, 0xAD, 0x00, 0xDE, 0xAD, 0xBE, 0xEF))
+    eq(0, hay.find(bytes(0xDE, 0xAD), 0), "find from the start")
+    eq(3, hay.find(bytes(0xDE, 0xAD), 1), "find the next one")
+    eq(0, hay.find(bytes(0xDE, 0xAD), 4), "find goes round at the end")
+    eq(3, hay.find(bytes(0xDE, 0xAD), 5, forward = false), "find backwards")
+    eq(-1, hay.find(bytes(0x12), 0), "not found")
+    eq(-1, hay.find(ByteArray(8), 0), "a pattern longer than the bytes is not found")
+
+    eq("DE AD BE EF", HexBuffer.pattern("de ad BE ef")!!.joinToString(" ") { HexBuffer.hex(it.toInt() and 0xFF) }, "a pattern typed as hex pairs")
+    eq("DE AD", HexBuffer.pattern("0xDE,0xAD")!!.joinToString(" ") { HexBuffer.hex(it.toInt() and 0xFF) }, "with 0x and commas")
+    eq("48 69 C3 A9", HexBuffer.pattern("\"Hi\u00E9\"")!!.joinToString(" ") { HexBuffer.hex(it.toInt() and 0xFF) }, "a quoted text is its UTF-8 bytes")
+    eq(null, HexBuffer.pattern("ABC"), "an odd number of digits is no pattern")
+    eq(null, HexBuffer.pattern("zz"), "nor are other letters")
+    eq(listOf(26, 26, 26, null, null), listOf("26", "0x1A", "1ah", "-1", "x").map { HexBuffer.offset(it) }, "offsets in decimal and hex")
+    eq("A.~.", listOf(0x41, 0x00, 0x7E, 0xFF).map { HexBuffer.shown(it) }.joinToString(""), "the text column shows printable ASCII and dots")
+}
+
 fun main(args: Array<String>) {
     val assets = File(args.firstOrNull() ?: "app/src/main/assets/npp")
     ScintillaNative.init(HostPlatform(), 2.0f, 48f)
@@ -1099,6 +1278,8 @@ fun main(args: Array<String>) {
     testCompletion(assets)
     testProjects()
     testUserLanguages(assets, registry, theme)
+    testCompare()
+    testHexBuffer()
     println("core: ${checks - failures}/$checks checks passed")
     exitProcess(if (failures == 0) 0 else 1)
 }

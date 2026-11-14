@@ -119,19 +119,24 @@ object FileIo {
         return uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "file"
     }
 
+    /** The file's bytes exactly as they are stored. */
     @Throws(IOException::class)
-    fun read(context: Context, uri: Uri, encoding: TextEncoding? = null): LoadedFile {
-        val bytes = (context.contentResolver.openInputStream(uri) ?: throw IOException("Cannot open the file")).use { input ->
+    fun readBytes(context: Context, uri: Uri, limit: Long = MAX_FILE_BYTES): ByteArray =
+        (context.contentResolver.openInputStream(uri) ?: throw IOException("Cannot open the file")).use { input ->
             val out = java.io.ByteArrayOutputStream()
             val buffer = ByteArray(64 * 1024)
             while (true) {
                 val n = input.read(buffer)
                 if (n < 0) break
                 out.write(buffer, 0, n)
-                if (out.size() > MAX_FILE_BYTES) throw IOException("The file is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB")
+                if (out.size() > limit) throw IOException("The file is larger than ${limit / (1024 * 1024)} MB")
             }
             out.toByteArray()
         }
+
+    @Throws(IOException::class)
+    fun read(context: Context, uri: Uri, encoding: TextEncoding? = null): LoadedFile {
+        val bytes = readBytes(context, uri)
         val used = encoding ?: TextEncodings.detect(bytes)
         val utf8 = TextEncodings.toUtf8(bytes, used)
         return LoadedFile(displayName(context, uri), utf8, used, Eol.detect(utf8))

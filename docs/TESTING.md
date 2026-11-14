@@ -50,6 +50,10 @@ and saves a screenshot at every step. It covers:
 - the split screen: clone and move to the other view, that it takes no typing, scrolling and zooming
   together, swapping the views, and a second window for a file
 - right-to-left text direction: where the text is drawn, and that a touch still finds its character
+- the Compare plugin: marks and blank rows in both views, moving between differences, the options,
+  comparing again while typing, compare with the clipboard and with the saved file, clearing
+- the Hex Editor plugin: a binary file's bytes shown and saved exactly, typing in the hex and text columns,
+  insert, delete, undo, go to offset, find, switching tabs, and bytes typed into an unsaved text
 - highlighting for C++, Python, HTML and JSON
 
 Long menus are not swiped through: the test asks the app to bring the wanted row on screen and then taps
@@ -86,6 +90,11 @@ Editor:
 - A second window (Open in New Instance) keeps no session: what is unsaved in it is asked about on Back,
   and lost if Android closes the window.
 - User-defined languages are edited as their XML definition files; there is no form for it.
+- Compare shows the old text in the second view, so it shares that view's limits, and it turns word wrap
+  off while it is shown. Texts that differ in more than a few thousand lines are compared roughly.
+- The Hex Editor holds the whole file in memory (16 MB at most), overwrites rather than inserts as you
+  type, and has no selection, copy or paste yet. Bytes changed in a saved file are not part of the
+  session backup: they are lost if Android closes the app before they are saved.
 - Scintilla's own autocompletion lists and call tips are stubbed out in the platform layer; the app shows
   completions and parameter hints in a row above the keyboard instead.
 - No TalkBack / accessibility support beyond labelled buttons.

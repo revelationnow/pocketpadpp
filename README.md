@@ -95,6 +95,15 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - Notepad++'s user-defined language files (UDL) work as they are: import them, edit them, export them
 - Markdown is highlighted out of the box, with the definitions Notepad++ itself ships
 
+**Plugins**
+- Notepad++'s two best-known plugins are built in, under a Plugins menu of their own
+- Compare: two documents one above the other with added, removed and changed lines tinted, the changed
+  characters marked and blank rows keeping the two level; next / previous difference, compare with the
+  clipboard or with the file as last saved, ignore case or spaces, and the comparison follows your typing
+- Hex Editor: any document as bytes, in hex and as text side by side. A saved file is shown and saved back
+  byte for byte, so files that are not text stay intact. Overwrite, insert and delete bytes, undo, go to
+  an offset, find bytes or text
+
 **Macros and Run**
 - Record typing and editing keys, play the recording back once, a number of times or to the end of the file,
   and save macros under a name
@@ -168,7 +177,7 @@ The [feature map](docs/FEATURES.md) lists every Notepad++ command with its statu
 |---|---|
 | Search | Notepad++'s regular expression syntax in Find and Replace |
 | Languages | A form for defining a language, in place of editing its XML |
-| Plugins | Notepad++ plugins are Windows libraries and cannot run as they are. A plugin system that builds from source is planned, starting with a hex editor and a compare tool |
+| Plugins | Notepad++ plugins are Windows libraries and cannot run as they are. Compare and the Hex Editor are built in; a way to script smaller plugins is planned |
 
 Known gaps in what exists are listed in [docs/TESTING.md](docs/TESTING.md#known-gaps). The ones you are most
 likely to meet: regular expressions use ECMAScript syntax for now (no lookbehind), folds are not remembered
