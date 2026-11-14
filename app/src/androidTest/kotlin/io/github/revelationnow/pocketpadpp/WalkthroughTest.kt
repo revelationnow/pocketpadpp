@@ -2422,7 +2422,9 @@ class WalkthroughTest {
         openMenu("View", "Text Direction LTR")
         tapDescribed("Close menu")
         assertTrue(!onUi { it.editor.rightToLeft })
-        assertTrue("back at the left", inkCentre() in 0.0..0.45)
+        shot("text-direction-ltr-again")
+        val back = inkCentre()
+        assertTrue("back at the left: $back, text ${text().length} long", back in 0.0..0.45)
         onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
     }
 
