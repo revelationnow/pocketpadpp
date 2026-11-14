@@ -65,6 +65,19 @@ class MenuSheet(private val context: Context, dark: Boolean = false) {
     /** Gives the shortcut to show beside a command, from the labels of the levels above it and its own id. */
     var hints: ((List<String>) -> String)? = null
 
+    private val rowViews = HashMap<String, View>()
+
+    /**
+     * Scrolls a long menu so that the row with this label is on screen. Returns false when there is no such
+     * row. The on-device tests use it instead of swiping through every menu.
+     */
+    fun reveal(label: String): Boolean {
+        val row = rowViews[label] ?: return false
+        if (!dialog.isShowing) return false
+        scroller.scrollTo(0, (row.top - scroller.height / 3).coerceAtLeast(0))
+        return true
+    }
+
     /** Draws the level being shown again, after something it displays has changed. */
     fun refresh() {
         if (stack.isNotEmpty() && dialog.isShowing) render()
@@ -200,8 +213,11 @@ class MenuSheet(private val context: Context, dark: Boolean = false) {
         title.text = stack.joinToString("  ›  ") { it.title }
         backButton.visibility = if (stack.size > 1) View.VISIBLE else View.INVISIBLE
         rows.removeAllViews()
+        rowViews.clear()
         for (entry in spec.entries) {
-            rows.addView(row(entry), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            val view = row(entry)
+            rowViews.putIfAbsent(entry.label, view)
+            rows.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         val maxHeight = (context.resources.displayMetrics.heightPixels * 0.62f).toInt()
         scroller.layoutParams = (scroller.layoutParams as LinearLayout.LayoutParams).apply {

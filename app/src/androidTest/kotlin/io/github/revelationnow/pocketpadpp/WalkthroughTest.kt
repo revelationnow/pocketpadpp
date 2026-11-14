@@ -34,6 +34,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestName
+import org.junit.rules.Timeout
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.regex.Pattern
@@ -54,6 +55,10 @@ class WalkthroughTest {
 
     @get:Rule
     val testName = TestName()
+
+    // One test that hangs must not take the rest of the run with it.
+    @get:Rule
+    val timeLimit: Timeout = Timeout.seconds(480)
 
     @Before
     fun launchClean() {
@@ -157,6 +162,18 @@ class WalkthroughTest {
 
     /** Taps a row of the open menu, scrolling long menus until the row appears. */
     private fun menu(label: String) {
+        // Long menus are not swiped through row by row: the app is asked to bring the row on screen, which
+        // keeps the walkthrough from taking most of an hour. Lists that cannot do that are swiped as before.
+        if (onUi { it.revealMenuRow(label) }) {
+            device.waitForIdle()
+            val row = device.wait(Until.findObject(By.clazz("android.widget.ScrollView")), 4000)?.wait(Until.findObject(By.text(label)), 2000)
+            if (row != null && row.visibleBounds.height() > 10) {
+                row.click()
+                device.waitForIdle()
+                SystemClock.sleep(150)
+                return
+            }
+        }
         var atEnd = false
         repeat(60) {
             val list = device.wait(Until.findObject(By.clazz("android.widget.ScrollView")), 4000)
@@ -2005,6 +2022,83 @@ class WalkthroughTest {
         openMenu("View", "Function List")
         assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("Notepad\\+\\+ has no function list rules.*"))), 5000) == true)
         tapDescribed("Close panel")
+    }
+
+    @Test
+    fun autoCompletionAndParameterHints() {
+        fun soft(text: String) = onUi { it.editor.onCreateInputConnection(EditorInfo())!!.commitText(text, 1) }
+        fun offered() = onUi { it.completionWords }
+        fun hint() = onUi { it.callHint }
+        setText("total = 1\ntotals = [total]\n", "python")
+        sci(Sci.SCI_DOCUMENTEND)
+
+        // Words of the document are offered from the second letter on, above the keyboard.
+        soft("t")
+        assertEquals("one letter is too little", emptyList<String>(), offered())
+        soft("o")
+        assertTrue("the document's words are offered: ${offered()}", offered().containsAll(listOf("total", "totals")))
+        shot("auto-completion")
+        tap("totals")
+        assertEquals("total = 1\ntotals = [total]\ntotals", text())
+        assertEquals("the list goes once a word was taken", emptyList<String>(), offered())
+
+        // So are the language's own functions, with a hint for their parameters once the bracket is typed.
+        soft("\n")
+        soft("r")
+        soft("a")
+        soft("n")
+        assertTrue("python's functions are offered: ${offered()}", "range" in offered())
+        tap("range")
+        soft("(")
+        waitUntil("the parameter hint") { hint().contains("range") }
+        shot("parameter-hint")
+        soft(")")
+        assertEquals("the hint goes when the call is closed", "", hint())
+        // Asked for by command, inside the brackets.
+        sci(Sci.SCI_CHARLEFT)
+        openMenu("Edit", "Auto-Completion", "Function Parameters Hint")
+        assertTrue(hint().contains("range"))
+        sci(Sci.SCI_DOCUMENTSTART)
+        waitUntil("the hint to go when the caret leaves the line") { hint().isEmpty() }
+
+        // Word Completion with one candidate completes straight away.
+        setText("alphabet\nalp")
+        sci(Sci.SCI_DOCUMENTEND)
+        openMenu("Edit", "Auto-Completion", "Word Completion")
+        assertEquals("alphabet\nalphabet", text())
+
+        // Path Completion lists the folder being typed.
+        val folder = File(context.cacheDir, "paths").apply {
+            deleteRecursively()
+            mkdirs()
+            File(this, "report.txt").writeText("x")
+            File(this, "readme.md").writeText("x")
+            File(this, "other.txt").writeText("x")
+        }
+        try {
+            setText("open ${folder.path}/re")
+            sci(Sci.SCI_DOCUMENTEND)
+            openMenu("Edit", "Auto-Completion", "Path Completion")
+            assertEquals(listOf("readme.md", "report.txt"), offered())
+            shot("path-completion")
+            tap("report.txt")
+            assertEquals("open ${folder.path}/report.txt", text())
+        } finally {
+            folder.deleteRecursively()
+        }
+
+        // It can be turned off in the preferences.
+        openMenu("Settings", "Preferences...")
+        menu("Auto-Completion")
+        menu("Enable Auto-Completion on Each Input")
+        shot("preferences-auto-completion")
+        tapDescribed("Close menu")
+        setText("total = 1\n")
+        sci(Sci.SCI_DOCUMENTEND)
+        soft("t")
+        soft("o")
+        assertEquals(emptyList<String>(), offered())
+        onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
     }
 
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */

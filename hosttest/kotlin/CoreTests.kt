@@ -1,5 +1,7 @@
 package host
 
+import io.github.revelationnow.pocketpadpp.core.ApiIndex
+import io.github.revelationnow.pocketpadpp.core.Completion
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.EditorOptions
 import io.github.revelationnow.pocketpadpp.core.BoostPattern
@@ -881,6 +883,63 @@ private fun testFunctionList(assets: File, data: File) {
     )
 }
 
+private fun testCompletion(assets: File) {
+    val files = File(assets, "autoCompletion").listFiles { f -> f.name.endsWith(".xml") }!!.sortedBy { it.name }
+    ok(files.size >= 30, "auto-completion files are bundled (${files.size})")
+    for (file in files) {
+        val size = runCatching { file.inputStream().use { ApiIndex.load(it) }.size }.getOrDefault(0)
+        ok(size > 0, "auto-completion file ${file.name} can be read")
+    }
+    val python = File(assets, "autoCompletion/python.xml").inputStream().use { ApiIndex.load(it) }
+    ok(python.complete("pri").contains("print"), "API completion of a prefix")
+    ok(!python.complete("print").contains("print"), "a word that is already complete is not offered")
+    eq(emptyList<String>(), python.complete(""), "nothing is offered for no prefix")
+    eq(emptyList<String>(), python.complete("PRI"), "python's names are matched with their case")
+    val sql = File(assets, "autoCompletion/sql.xml").inputStream().use { ApiIndex.load(it) }
+    ok(sql.ignoreCase && sql.complete("sel").any { it.equals("SELECT", ignoreCase = true) }, "SQL's names are matched without case")
+
+    val text = "total = 0\ntotals = []\nfor item in items:\n    total += item.price\nto"
+    eq(listOf("total", "totals"), Completion.words(text, "to", ignoreCase = false), "words of the document, sorted, once each")
+    eq(emptyList<String>(), Completion.words(text, "x", ignoreCase = false), "no word starts like this")
+    eq(listOf("item.price", "items"), Completion.words(text, "item", ignoreCase = false, extraWordChars = "."), "extra word characters extend words")
+    val both = Completion.candidates(text, "to", python, fromApi = true, fromWords = true)
+    ok(both.containsAll(listOf("total", "totals")) && both == both.sorted(), "API names and document words come as one sorted list")
+    ok("to" !in both, "the prefix itself is not offered")
+    eq(listOf("total", "totals"), Completion.candidates(text, "to", python, fromApi = false, fromWords = true), "words only")
+
+    val sci = HostSci()
+    sci.text = "x = pri"
+    sci.send(Sci.SCI_GOTOPOS, 7)
+    val (start, prefix) = Completion.prefix(sci)
+    eq(4L to "pri", start to prefix, "the prefix before the caret and where it starts")
+    Completion.accept(sci, start, "print")
+    eq("x = print", sci.text, "accepting a word replaces the prefix")
+    eq(9L, sci.send(Sci.SCI_GETCURRENTPOS), "and leaves the caret after it")
+    sci.text = "naïve_wo"
+    sci.send(Sci.SCI_GOTOPOS, sci.send(Sci.SCI_GETLENGTH))
+    eq(0L to "naïve_wo", Completion.prefix(sci), "prefixes count in bytes for Scintilla")
+    sci.text = "a.b"
+    sci.send(Sci.SCI_GOTOPOS, 3)
+    eq(2L to "b", Completion.prefix(sci), "a dot ends a word by default")
+    eq(0L to "a.b", Completion.prefix(sci, "."), "unless the language counts it in")
+
+    val c = File(assets, "autoCompletion/c.xml").inputStream().use { ApiIndex.load(it) }
+    val site = Completion.callSite("    n = fopen(name, ", c)!!
+    eq("fopen" to 1, site.word.name to site.parameter, "the call being typed and the parameter the caret is in")
+    val (hint, from, to) = Completion.hint(site, 0, c)
+    ok(hint.contains("fopen (") && from > 0 && hint.substring(from, to).isNotEmpty(), "the hint marks the current parameter: $hint")
+    eq("strlen" to 0, Completion.callSite("x = fopen(a, b) + strlen(", c)!!.let { it.word.name to it.parameter }, "a finished call is stepped over")
+    eq("fopen" to 1, Completion.callSite("fopen(strlen(a), ", c)!!.let { it.word.name to it.parameter }, "a nested finished call does not count as a separator")
+    eq(null, Completion.callSite("x = unknown_function(", c), "an unknown function gives no hint")
+    eq(null, Completion.callSite("no call here", c), "no call, no hint")
+
+    val listing = mapOf("/data/" to listOf("notes.txt", "Notebook", "music"), "/data/Notebook/" to listOf("a.md"))
+    eq(2 to listOf("Notebook", "notes.txt"), Completion.paths("open \"/data/no", { listing[it] }), "path completion lists what fits")
+    eq(0 to listOf("a.md"), Completion.paths("/data/Notebook/", { listing[it] }), "path completion right after a slash")
+    eq(0 to emptyList<String>(), Completion.paths("plain words", { listing[it] }), "no path, nothing offered")
+    eq(0 to emptyList<String>(), Completion.paths("/missing/x", { listing[it] }), "an unreadable folder offers nothing")
+}
+
 fun main(args: Array<String>) {
     val assets = File(args.firstOrNull() ?: "app/src/main/assets/npp")
     ScintillaNative.init(HostPlatform(), 2.0f, 48f)
@@ -894,6 +953,7 @@ fun main(args: Array<String>) {
     testSession()
     testSettings(registry, theme)
     testFunctionList(assets, File(args.getOrNull(1) ?: "hosttest/data/functionList"))
+    testCompletion(assets)
     println("core: ${checks - failures}/$checks checks passed")
     exitProcess(if (failures == 0) 0 else 1)
 }

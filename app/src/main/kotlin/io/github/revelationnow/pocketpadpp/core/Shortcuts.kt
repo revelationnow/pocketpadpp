@@ -14,6 +14,7 @@ object Shortcuts {
         for (c in 'A'..'Z') add(c.toString() to c.code)
         for (c in '0'..'9') add(c.toString() to c.code)
         for (n in 1..12) add("F$n" to FUNCTION + n)
+        add("Space" to ' '.code)
         add("Tab" to Sci.SCK_TAB)
         add("Enter" to Sci.SCK_RETURN)
         add("Backspace" to Sci.SCK_BACK)

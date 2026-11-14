@@ -17,8 +17,12 @@ adb shell wm dismiss-keyguard
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
 adb logcat -c
 
+# The run is cut off before the CI job's own time limit, so that a test that hangs still leaves its
+# screenshots and log behind to show where.
 status=0
-./gradlew --no-daemon -Pandroid.injected.build.abi=x86_64 connectedDebugAndroidTest || status=$?
+timeout --foreground --signal=INT "${UI_TEST_MINUTES:-60}m" \
+    ./gradlew --no-daemon -Pandroid.injected.build.abi=x86_64 connectedDebugAndroidTest || status=$?
+[ "$status" -eq 124 ] && echo "The tests did not finish in time."
 
 adb pull /sdcard/Download/pocketpad "$out/screens" >/dev/null 2>&1 || true
 adb logcat -d -v time PocketpadTest:V PocketpadSci:V AndroidRuntime:E ActivityManager:E TestRunner:I '*:S' > "$out/logcat.txt" 2>/dev/null || true

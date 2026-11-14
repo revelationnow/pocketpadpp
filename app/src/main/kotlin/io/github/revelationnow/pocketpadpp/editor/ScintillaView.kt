@@ -895,6 +895,7 @@ class ScintillaView @JvmOverloads constructor(
             KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_NUMPAD_ADD -> Sci.SCK_ADD
             KeyEvent.KEYCODE_MINUS, KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> Sci.SCK_SUBTRACT
             KeyEvent.KEYCODE_SLASH, KeyEvent.KEYCODE_NUMPAD_DIVIDE -> Sci.SCK_DIVIDE
+            KeyEvent.KEYCODE_SPACE -> ' '.code
             else -> 0
         }
         if (shortcut != 0 && modifiers and Sci.SCMOD_CTRL != 0) {
@@ -1097,6 +1098,7 @@ class ScintillaView @JvmOverloads constructor(
             KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_NUMPAD_ADD -> Sci.SCK_ADD
             KeyEvent.KEYCODE_MINUS, KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> Sci.SCK_SUBTRACT
             KeyEvent.KEYCODE_SLASH, KeyEvent.KEYCODE_NUMPAD_DIVIDE -> Sci.SCK_DIVIDE
+            KeyEvent.KEYCODE_SPACE -> ' '.code
             KeyEvent.KEYCODE_DPAD_LEFT -> Sci.SCK_LEFT
             KeyEvent.KEYCODE_DPAD_RIGHT -> Sci.SCK_RIGHT
             KeyEvent.KEYCODE_DPAD_UP -> Sci.SCK_UP

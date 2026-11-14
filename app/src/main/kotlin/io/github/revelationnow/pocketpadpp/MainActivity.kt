@@ -42,6 +42,9 @@ import io.github.revelationnow.pocketpadpp.app.Palette
 import io.github.revelationnow.pocketpadpp.app.MenuSpec
 import io.github.revelationnow.pocketpadpp.app.TabStrip
 import io.github.revelationnow.pocketpadpp.app.Workspace
+import io.github.revelationnow.pocketpadpp.core.ApiIndex
+import io.github.revelationnow.pocketpadpp.core.CallSite
+import io.github.revelationnow.pocketpadpp.core.Completion
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.EditorOptions
 import io.github.revelationnow.pocketpadpp.core.FunctionEntry
@@ -205,6 +208,7 @@ class MainActivity : Activity() {
             macroPaused = true
             if (options.autoIndent) EditOps.autoIndent(editor, ch)
             macroPaused = false
+            completeWhileTyping(ch)
         }
         editor.onMacroStep = { message, wParam, lParam, text ->
             if (recording && !macroPaused) currentMacro += MacroStep(message, wParam, lParam, text)
@@ -297,6 +301,7 @@ class MainActivity : Activity() {
         findBar.onClose = { editor.requestFocus() }
         root.addView(findBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
+        root.addView(completionBar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(extraKeys(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42f)))
         val status = statusBar()
         root.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -701,6 +706,7 @@ class MainActivity : Activity() {
     }
 
     private fun onEditorStateChanged() {
+        completionFollowsCaret()
         if (workspace.isDirty(workspace.active) != shownDirty) refreshTabs() else updateStatus()
         workspace.lineCountMayHaveChanged()
         EditOps.highlightBraces(editor)
@@ -1042,6 +1048,9 @@ class MainActivity : Activity() {
         }
     }
 
+    /** For the on-device tests: brings a row of the open menu on screen without swiping to it. */
+    internal fun revealMenuRow(label: String): Boolean = menuSheet?.reveal(label) ?: false
+
     private fun MenuSpec.mainMenu() {
         sub("File") { fileMenu() }
         sub("Edit") { editMenu() }
@@ -1214,6 +1223,14 @@ class MainActivity : Activity() {
             item("TAB to Space") { EditOps.tabsToSpaces(editor) }
             item("Space to TAB (All)") { EditOps.spacesToTabs(editor, leadingOnly = false) }
             item("Space to TAB (Leading)") { EditOps.spacesToTabs(editor, leadingOnly = true) }
+        }
+        sub("Auto-Completion") {
+            item("Function Completion") { completeNow(fromApi = true, fromWords = false) }
+            item("Word Completion") { completeNow(fromApi = false, fromWords = true) }
+            item("Function Parameters Hint") { if (!showCallHint()) toast("The caret is not inside a call of a known function") }
+            item("Function Parameters Previous Hint", enabled = callSite != null) { stepCallHint(-1) }
+            item("Function Parameters Next Hint", enabled = callSite != null) { stepCallHint(1) }
+            item("Path Completion") { completePath() }
         }
         sub("Paste Special") {
             item("Copy Binary Content") { copyBinary(cut = false) }
@@ -1588,6 +1605,28 @@ class MainActivity : Activity() {
             keyboardItems()
             item("Shortcut Mapper...") { showShortcutMapper() }
             item("Selection Menu Items...") { selectionMenuDialog() }
+        }
+        sub("Auto-Completion") {
+            val enabled = prefs.getBoolean("autoComplete", true)
+            val from = prefs.getInt("autoCompleteFrom", 2)
+            val source = prefs.getInt("autoCompleteSource", 0)
+            item("Enable Auto-Completion on Each Input", checked = enabled) {
+                prefs.edit().putBoolean("autoComplete", !enabled).apply()
+                hideCompletion()
+            }
+            sub("From") {
+                for (count in 1..4) {
+                    val label = when (count) { 1 -> "1st Character"; 2 -> "2nd Character"; 3 -> "3rd Character"; else -> "4th Character" }
+                    item(label, checked = from == count) { prefs.edit().putInt("autoCompleteFrom", count).apply() }
+                }
+            }
+            sub("Offer") {
+                for ((index, label) in listOf("Function and Word Completion", "Function Completion", "Word Completion").withIndex()) {
+                    item(label, checked = source == index) { prefs.edit().putInt("autoCompleteSource", index).apply() }
+                }
+            }
+            val hints = prefs.getBoolean("parameterHints", true)
+            item("Function Parameters Hint on Input", checked = hints) { prefs.edit().putBoolean("parameterHints", !hints).apply() }
         }
         sub("Search") {
             sub("Search Engine") { searchEngineItems() }
@@ -2813,6 +2852,199 @@ class MainActivity : Activity() {
         }
     }
 
+    // region Auto-completion
+
+    // A phone has no room for a list floating at the caret, and the keyboard would cover it. The words on offer
+    // sit in a row above the extra keys instead, like the suggestions of a keyboard, and so does the hint
+    // for the parameters of the function being called.
+    private lateinit var completionStrip: LinearLayout
+    private lateinit var completionScroller: HorizontalScrollView
+    private lateinit var callHintView: TextView
+    private val apiIndexes = HashMap<String, ApiIndex?>()
+    private var completionStart = -1L
+    private var completionCaret = -1L
+    private var completionKind = 0
+    internal var completionWords: List<String> = emptyList()
+    private var callSite: CallSite? = null
+    private var callOverload = 0
+    private var callLine = -1L
+
+    private fun completionBar(): View {
+        completionStrip = LinearLayout(themed).apply { orientation = LinearLayout.HORIZONTAL }
+        completionScroller = HorizontalScrollView(themed).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(palette.chrome)
+            visibility = View.GONE
+            addView(completionStrip)
+        }
+        callHintView = TextView(themed).apply {
+            contentDescription = "Function parameters hint"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextColor(palette.chromeText)
+            setBackgroundColor(palette.chrome)
+            typeface = Typeface.MONOSPACE
+            maxLines = 4
+            setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
+            visibility = View.GONE
+            // A tap shows the next way of calling the function.
+            setOnClickListener { stepCallHint(1) }
+        }
+        return LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(callHintView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(completionScroller, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40f)))
+        }.also {
+            // The screen is built again when the theme goes between light and dark.
+            completionWords = emptyList()
+            callSite = null
+        }
+    }
+
+    /** Notepad++'s auto-completion file for the language of the document on screen, if it has one. */
+    private fun apiIndex(): ApiIndex? {
+        val name = workspace.active.language.name
+        return apiIndexes.getOrPut(name) {
+            val file = API_FILES[name] ?: name
+            try {
+                assets.open("npp/autoCompletion/$file.xml").use { ApiIndex.load(it) }
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    private fun documentText(): String =
+        if (editor.send(Sci.SCI_GETLENGTH) <= MAX_COMPLETION_BYTES) editor.text else ""
+
+    private fun showCompletion(words: List<String>, start: Long, kind: Int) {
+        completionWords = words
+        completionStart = start
+        completionKind = kind
+        completionCaret = editor.send(Sci.SCI_GETCURRENTPOS)
+        completionStrip.removeAllViews()
+        for (word in words) {
+            completionStrip.addView(TextView(themed).apply {
+                text = word
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTextColor(palette.chromeText)
+                typeface = Typeface.MONOSPACE
+                gravity = Gravity.CENTER
+                setPadding(dp(12f), 0, dp(12f), 0)
+                setOnClickListener {
+                    Completion.accept(editor, completionStart, word)
+                    hideCompletion()
+                }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        completionScroller.scrollTo(0, 0)
+        completionScroller.visibility = if (words.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private fun hideCompletion() {
+        if (completionWords.isNotEmpty()) showCompletion(emptyList(), -1, 0)
+    }
+
+    /** What to offer for the word before the caret. Kind 0 is what the settings say, 1 functions, 2 words. */
+    private fun wordCandidates(kind: Int): Pair<Long, List<String>> {
+        val api = apiIndex()
+        val (start, prefix) = Completion.prefix(editor, api?.extraWordChars ?: "")
+        val source = if (kind == 0) prefs.getInt("autoCompleteSource", 0) else kind
+        val words = Completion.candidates(documentText(), prefix, api, fromApi = source != 2, fromWords = source != 1)
+        return start to (if (prefix.isEmpty()) emptyList() else words)
+    }
+
+    private fun completeWhileTyping(ch: Int) {
+        if (recording) return
+        val api = apiIndex()
+        if (prefs.getBoolean("parameterHints", true) && api != null) {
+            if (ch == api.startFunction.code || ch == api.separator.code) showCallHint()
+            else if (ch == api.stopFunction.code) showCallHint() || hideCallHint()
+        }
+        if (!prefs.getBoolean("autoComplete", true)) return
+        val (start, words) = wordCandidates(0)
+        val typed = editor.send(Sci.SCI_GETCURRENTPOS) - start
+        if (typed >= prefs.getInt("autoCompleteFrom", 2)) showCompletion(words, start, 0) else hideCompletion()
+    }
+
+    /** After the caret moved: the list follows a word that is still being typed or shortened, and goes otherwise. */
+    private fun completionFollowsCaret() {
+        val caret = editor.send(Sci.SCI_GETCURRENTPOS)
+        if (completionWords.isNotEmpty() && caret != completionCaret) {
+            val (start, words) = if (completionKind == 3) -1L to emptyList() else wordCandidates(completionKind)
+            if (start == completionStart && caret > start) showCompletion(words, start, completionKind) else hideCompletion()
+        }
+        if (callSite != null && editor.send(Sci.SCI_LINEFROMPOSITION, caret) != callLine) hideCallHint()
+    }
+
+    /** Edit > Auto-Completion > Function Completion and Word Completion. */
+    private fun completeNow(fromApi: Boolean, fromWords: Boolean) {
+        val kind = if (fromApi) 1 else 2
+        val (start, words) = wordCandidates(kind)
+        when {
+            start == editor.send(Sci.SCI_GETCURRENTPOS) -> toast("Type the start of a word first")
+            words.isEmpty() -> toast(if (fromApi && apiIndex() == null) "Notepad++ has no function list for ${workspace.active.language.display}" else "Nothing to complete this with")
+            words.size == 1 && fromWords -> Completion.accept(editor, start, words[0])
+            else -> showCompletion(words, start, kind)
+        }
+    }
+
+    /** Edit > Auto-Completion > Path Completion: the names in the folder whose path is being typed. */
+    private fun completePath() {
+        val caret = editor.send(Sci.SCI_GETCURRENTPOS)
+        val lineStart = editor.send(Sci.SCI_POSITIONFROMLINE, editor.send(Sci.SCI_LINEFROMPOSITION, caret))
+        val before = String(editor.range(lineStart, caret), Charsets.UTF_8)
+        val (typed, names) = Completion.paths(before) { folder -> java.io.File(folder).list()?.toList() }
+        if (names.isEmpty()) return toast("No folder this app can read matches the path before the caret")
+        showCompletion(names, caret - before.takeLast(typed).toByteArray(Charsets.UTF_8).size, 3)
+    }
+
+    /** Shows how to call the function the caret is in. Returns false when it is in none that is known. */
+    private fun showCallHint(): Boolean {
+        val api = apiIndex() ?: return false
+        val caret = editor.send(Sci.SCI_GETCURRENTPOS)
+        val line = editor.send(Sci.SCI_LINEFROMPOSITION, caret)
+        val before = String(editor.range(editor.send(Sci.SCI_POSITIONFROMLINE, line), caret), Charsets.UTF_8)
+        val site = Completion.callSite(before, api) ?: return false
+        if (site.word !== callSite?.word) callOverload = 0
+        callSite = site
+        callLine = line
+        drawCallHint()
+        return true
+    }
+
+    private fun hideCallHint(): Boolean {
+        callSite = null
+        callHintView.visibility = View.GONE
+        return true
+    }
+
+    private fun stepCallHint(step: Int) {
+        val site = callSite ?: return
+        val count = site.word.overloads.size
+        callOverload = (callOverload + step + count) % count
+        drawCallHint()
+    }
+
+    private fun drawCallHint() {
+        val site = callSite ?: return
+        val api = apiIndex() ?: return
+        val (text, from, to) = Completion.hint(site, callOverload, api)
+        val overload = site.word.overloads[callOverload]
+        val shown = android.text.SpannableStringBuilder(text)
+        if (from >= 0) {
+            shown.setSpan(android.text.style.StyleSpan(Typeface.BOLD), from, to, 0)
+            shown.setSpan(android.text.style.ForegroundColorSpan(palette.accent), from, to, 0)
+        }
+        if (site.word.overloads.size > 1) shown.append("   \u25B2 ${callOverload + 1} of ${site.word.overloads.size} \u25BC")
+        if (overload.description.isNotEmpty()) shown.append("\n").append(overload.description.trim())
+        callHintView.text = shown
+        callHintView.visibility = View.VISIBLE
+    }
+
+    internal val callHint: String get() = if (callHintView.visibility == View.VISIBLE) callHintView.text.toString() else ""
+
+    // endregion
+
     // region Function List
 
     // Notepad++'s function list rules by language name; null for a language that has none.
@@ -3197,6 +3429,10 @@ class MainActivity : Activity() {
         const val PANEL_FOLDERS = "Folders"
         const val PANEL_FUNCTIONS = "Functions"
         const val MAX_FUNCTION_LIST_BYTES = 3L * 1024 * 1024
+        const val MAX_COMPLETION_BYTES = 512L * 1024
+
+        /** Auto-completion files whose names differ from the language's. */
+        val API_FILES = mapOf("javascript.js" to "javascript", "coffeescript" to "coffee", "baanc" to "BaanC")
         const val COMMAND_SEPARATOR = " > "
 
         /** Font families every Android device has. */
@@ -3294,6 +3530,12 @@ class MainActivity : Activity() {
             put("Macro > Stop Recording", key(CTRL or SHIFT, 'R'.code))
             put("Macro > Playback", key(CTRL or SHIFT, 'P'.code))
             put("Run > Run...", key(0, f(5)))
+            put("Edit > Auto-Completion > Function Completion", key(CTRL, ' '.code))
+            put("Edit > Auto-Completion > Word Completion", key(CTRL, Sci.SCK_RETURN))
+            put("Edit > Auto-Completion > Function Parameters Hint", key(CTRL or SHIFT, ' '.code))
+            put("Edit > Auto-Completion > Function Parameters Previous Hint", key(ALT, Sci.SCK_UP))
+            put("Edit > Auto-Completion > Function Parameters Next Hint", key(ALT, Sci.SCK_DOWN))
+            put("Edit > Auto-Completion > Path Completion", key(CTRL or ALT, ' '.code))
         }
         const val MAX_FIND_FILES = 5000
         const val MONITOR_MS = 2000L

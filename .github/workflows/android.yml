@@ -33,7 +33,7 @@ jobs:
   ui-tests:
     name: UI tests (emulator)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 80
     permissions:
       contents: write
     steps:
