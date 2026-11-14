@@ -358,6 +358,8 @@ class Workspace(
         val plan = LanguageSetup.plan(doc.language, languages, theme)
         if (!doc.lexerApplied) {
             LanguageSetup.applyToDocument(editor, plan)
+            // The user-defined-language lexer keeps what it knows of a document under a number of the document's own.
+            if (doc.language.user != null) editor.sendStrings(Sci.SCI_SETPROPERTY, "userDefine.currentBufferID", doc.id.toString())
             doc.lexerApplied = true
         }
         ThemeApplier.apply(editor, theme, plan, metrics())
@@ -376,6 +378,23 @@ class Workspace(
     fun setLanguage(language: Language) {
         active.language = language
         active.lexerApplied = false
+        applyLanguage(active)
+        editor.send(Sci.SCI_COLOURISE, 0, -1)
+        onTabsChanged?.invoke()
+    }
+
+    /** Gives another view of the active tab's document, such as the Document Map, the tab's colours. */
+    fun styleOther(other: io.github.revelationnow.pocketpadpp.core.SciApi, otherMetrics: ViewMetrics) {
+        ThemeApplier.apply(other, theme, LanguageSetup.plan(active.language, languages, theme), otherMetrics)
+    }
+
+    /** After the user-defined languages were read again: tabs that use one get its new definition, or lose it. */
+    fun userLanguagesChanged() {
+        for (doc in docs) {
+            if (doc.language.user == null) continue
+            doc.language = languages.byName(doc.language.name)?.takeIf { it.user != null } ?: languages.normal
+            doc.lexerApplied = false
+        }
         applyLanguage(active)
         editor.send(Sci.SCI_COLOURISE, 0, -1)
         onTabsChanged?.invoke()

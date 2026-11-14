@@ -48,6 +48,10 @@ class Language(
     /** Keyword lists by class index. */
     internal val keywords = arrayOfNulls<String>(17)
 
+    /** Set for a user-defined language: its definition. */
+    var user: UserLanguage? = null
+        internal set
+
     fun keywordsOf(classIndex: Int): String = keywords.getOrNull(classIndex) ?: ""
 
     override fun toString(): String = name
@@ -72,12 +76,38 @@ class LanguageRegistry private constructor(val languages: List<Language>) {
         }
     }
 
-    fun byName(name: String?): Language? = byName[name]
+    /** The user-defined languages, in the order they were given. */
+    var userLanguages: List<Language> = emptyList()
+        private set
+
+    /** True while a dark theme is in use, which decides between two definitions for the same file extension. */
+    var darkTheme = false
+
+    /** Replaces the user-defined languages. Each becomes a language of its own name. */
+    fun setUserLanguages(definitions: List<UserLanguage>) {
+        userLanguages = definitions.distinctBy { it.name }.map { definition ->
+            Language(definition.name, definition.name, "user", "udl", 0, emptyList()).apply {
+                extensions = definition.extensions
+                commentLine = definition.commentLine
+                commentStart = definition.commentStart
+                commentEnd = definition.commentEnd
+                user = definition
+            }
+        }
+    }
+
+    fun byName(name: String?): Language? = byName[name] ?: userLanguages.firstOrNull { it.name == name }
 
     /** Picks a language from a file name, by well-known names first and then by extension. */
     fun forFileName(fileName: String): Language {
         val base = fileName.substringAfterLast('/').substringAfterLast('\\')
         val lower = base.lowercase()
+        // As in Notepad++, a user-defined language that names the extension comes before the built-in ones.
+        val ending = lower.substringAfterLast('.', "")
+        if (ending.isNotEmpty() && lower.contains('.')) {
+            val claiming = userLanguages.filter { language -> language.extensions.any { it.equals(ending, ignoreCase = true) } }
+            (claiming.firstOrNull { it.user?.darkModeTheme == darkTheme } ?: claiming.firstOrNull())?.let { return it }
+        }
         WELL_KNOWN[lower]?.let { known -> byName[known]?.let { return it } }
         val extension = lower.substringAfterLast('.', "")
         if (extension.isEmpty() || !lower.contains('.')) return normal

@@ -30,6 +30,7 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import io.github.revelationnow.pocketpadpp.app.Doc
+import io.github.revelationnow.pocketpadpp.app.DocumentMap
 import io.github.revelationnow.pocketpadpp.app.FileIo
 import io.github.revelationnow.pocketpadpp.app.FindBar
 import io.github.revelationnow.pocketpadpp.app.FolderNode
@@ -68,9 +69,13 @@ import io.github.revelationnow.pocketpadpp.core.MacroStep
 import io.github.revelationnow.pocketpadpp.core.Macros
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
+import io.github.revelationnow.pocketpadpp.core.ProjectNode
+import io.github.revelationnow.pocketpadpp.core.ProjectStore
 import io.github.revelationnow.pocketpadpp.core.RunCommand
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
 import io.github.revelationnow.pocketpadpp.core.TextEncodings
+import io.github.revelationnow.pocketpadpp.core.UserLanguage
+import io.github.revelationnow.pocketpadpp.core.UserLanguages
 import io.github.revelationnow.pocketpadpp.core.TextTransforms
 import io.github.revelationnow.pocketpadpp.core.ThemeApplier
 import io.github.revelationnow.pocketpadpp.core.ViewMetrics
@@ -124,6 +129,8 @@ class MainActivity : Activity() {
     private var lockedModifiers = 0
     private val modifierKeys = LinkedHashMap<Int, Button>()
     private lateinit var root: LinearLayout
+    private lateinit var editorRow: LinearLayout
+    internal var documentMap: DocumentMap? = null
     private var themeName = ""
 
     // The theme as its file has it, and what the Style Configurator changed about it.
@@ -182,6 +189,9 @@ class MainActivity : Activity() {
             assets.open("npp/langs.model.xml").use { xml -> LanguageRegistry.load(table, xml) }
         }
 
+        loadUserLanguages(languages)
+        languages.darkTheme = palette.dark
+
         editor.send(Sci.SCI_SETWRAPMODE, (if (prefs.getBoolean("wrap", false)) Sci.SC_WRAP_WORD else Sci.SC_WRAP_NONE).toLong())
         editor.keyboardMode = if (prefs.getBoolean("textKeyboard", false)) ScintillaView.KeyboardMode.TEXT else ScintillaView.KeyboardMode.CODE
 
@@ -192,7 +202,10 @@ class MainActivity : Activity() {
             )
         }
         workspace.onTabsChanged = { refreshTabs() }
-        workspace.afterStyle = { options.apply(editor, resources.displayMetrics.density) }
+        workspace.afterStyle = {
+            options.apply(editor, resources.displayMetrics.density)
+            styleDocumentMap()
+        }
         workspace.newDocumentEol = Eol.fromSciMode(prefs.getInt("newEol", Eol.LF.sciMode))
         workspace.newDocumentEncoding = TextEncodings.byId(prefs.getString("newEncoding", null)) ?: TextEncodings.UTF8
         // The tab the app starts with was made before these settings were read.
@@ -200,6 +213,7 @@ class MainActivity : Activity() {
         editor.send(Sci.SCI_SETEOLMODE, workspace.newDocumentEol.sciMode.toLong())
         options.apply(editor, resources.displayMetrics.density)
         applySelectionMenu()
+        if (prefs.getBoolean("documentMap", false)) setDocumentMap(true)
 
         editor.onStateChanged = { onEditorStateChanged() }
         editor.onTextChanged = { workspace.textChanged() }
@@ -276,7 +290,14 @@ class MainActivity : Activity() {
         root.addView(tabRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38f)))
         chromeBars += tabRow
 
-        root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        // The editor, with room beside it for the Document Map.
+        editorRow = LinearLayout(themed).apply { orientation = LinearLayout.HORIZONTAL }
+        editorRow.addView(editor, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        documentMap?.let { map ->
+            (map.parent as? ViewGroup)?.removeView(map)
+            editorRow.addView(map, LinearLayout.LayoutParams(dp(MAP_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        root.addView(editorRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         results = ResultsPanel(themed, palette)
         results.onOpen = { group, hit -> goToHit(group, hit) }
@@ -706,6 +727,7 @@ class MainActivity : Activity() {
     }
 
     private fun onEditorStateChanged() {
+        documentMap?.sync()
         completionFollowsCaret()
         if (workspace.isDirty(workspace.active) != shownDirty) refreshTabs() else updateStatus()
         workspace.lineCountMayHaveChanged()
@@ -859,6 +881,8 @@ class MainActivity : Activity() {
                 if (destroyed) return@post
                 result.onSuccess { complete ->
                     if (markSaved) workspace.markSaved(doc, uri, name)
+                    // A language definition takes effect when it is saved.
+                    if (uri.scheme == "file" && uri.path?.startsWith(udlFolder().path) == true) reloadUserLanguages()
                     toast(if (complete) "Saved $name" else "Saved, but ${encoding.label} cannot hold every character; those were written as ?")
                     then?.invoke()
                 }.onFailure {
@@ -924,6 +948,63 @@ class MainActivity : Activity() {
                             },
                         )
                     }
+                }
+            }
+
+            REQUEST_IMPORT_UDL -> data.data?.let { uri ->
+                io.execute {
+                    val bytes = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                    val name = FileIo.displayName(this, uri)
+                    ui.post {
+                        if (destroyed) return@post
+                        val names = bytes?.let { importUserLanguages(name, it) } ?: emptyList()
+                        toast(if (names.isEmpty()) "That is not a user-defined language file" else "Added ${names.joinToString()}")
+                    }
+                }
+            }
+
+            REQUEST_EXPORT_UDL -> data.data?.let { uri ->
+                val file = udlToExport ?: return
+                udlToExport = null
+                io.execute {
+                    val ok = runCatching { FileIo.write(this, uri, file.readBytes()) }.isSuccess
+                    ui.post { if (!destroyed) toast(if (ok) "Definition saved" else "Cannot write the file") }
+                }
+            }
+
+            REQUEST_PROJECT_FILES -> {
+                val (index, node) = projectTarget ?: return
+                projectTarget = null
+                val uris = ArrayList<Uri>()
+                data.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { uris += it } }
+                if (uris.isEmpty()) data.data?.let { uris += it }
+                for (uri in uris) {
+                    FileIo.persistAccess(this, uri)
+                    node.add(ProjectNode(ProjectNode.Kind.FILE, FileIo.displayName(this, uri), uri.toString()))
+                }
+                saveProjects(index)
+            }
+
+            REQUEST_OPEN_WORKSPACE -> data.data?.let { uri ->
+                val index = workspacePanel
+                io.execute {
+                    val text = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
+                    ui.post {
+                        if (destroyed) return@post
+                        val read = ProjectStore.read(text ?: "")
+                        if (read.isEmpty()) toast("That is not a Notepad++ workspace file") else {
+                            projectPanels[index] = read
+                            saveProjects(index)
+                        }
+                    }
+                }
+            }
+
+            REQUEST_SAVE_WORKSPACE -> data.data?.let { uri ->
+                val xml = ProjectStore.write(projectPanel(workspacePanel))
+                io.execute {
+                    val ok = runCatching { FileIo.write(this, uri, xml.toByteArray(Charsets.UTF_8)) }.isSuccess
+                    ui.post { if (!destroyed) toast(if (ok) "Workspace saved" else "Cannot write the workspace file") }
                 }
             }
 
@@ -1449,6 +1530,10 @@ class MainActivity : Activity() {
             for (level in 1..8) item(level.toString()) { EditOps.foldLevel(editor, level, collapse = false) }
         }
         item("Folder as Workspace") { showSidePanel(PANEL_FOLDERS) }
+        sub("Project Panels") {
+            for (index in 0 until PROJECT_PANELS) item("Project Panel ${index + 1}") { showProjectPanel(index) }
+        }
+        item("Document Map", checked = documentMap != null) { setDocumentMap(documentMap == null) }
         item("Document List") { showSidePanel(PANEL_DOCUMENTS) }
         item("Function List") { showSidePanel(PANEL_FUNCTIONS) }
         item("Summary...") { showSummary() }
@@ -1485,7 +1570,110 @@ class MainActivity : Activity() {
         for (language in workspace.languages.menu) {
             item(language.display, checked = language === current) { workspace.setLanguage(language) }
         }
+        sub("User Defined Language") {
+            item("Define your language...") { showUserLanguages() }
+            item("Open User Defined Language folder...") { showUserLanguages() }
+            item("Notepad++ User Defined Languages Collection") { openLink("https://github.com/notepad-plus-plus/userDefinedLanguages") }
+        }
+        // Notepad++'s "User-Defined" entry is the language being worked on in its definition dialog.
+        val defining = workspace.languages.byName(prefs.getString("udlCurrent", null))?.takeIf { it.user != null }
+        item("User-Defined", checked = defining != null && defining === current, id = "User-Defined") {
+            if (defining != null) workspace.setLanguage(defining) else showUserLanguages()
+        }
+        if (!cataloguing) {
+            for (language in workspace.languages.userLanguages) {
+                item(language.display, checked = language === current) { workspace.setLanguage(language) }
+            }
+        }
     }
+
+    // region User-defined languages
+
+    private fun udlFolder() = java.io.File(filesDir, "userDefineLangs").apply { mkdirs() }
+
+    // Which file each user-defined language comes from.
+    private val udlFiles = HashMap<String, java.io.File>()
+    private var udlToExport: java.io.File? = null
+
+    /** Reads the definition files kept with the app. The first time, Notepad++'s own Markdown definitions are put there. */
+    private fun loadUserLanguages(registry: LanguageRegistry) {
+        val folder = udlFolder()
+        if (!prefs.getBoolean("udlInstalled", false)) {
+            for (name in assets.list("npp/userDefineLangs") ?: emptyArray()) {
+                runCatching { assets.open("npp/userDefineLangs/$name").use { input -> java.io.File(folder, name).writeBytes(input.readBytes()) } }
+            }
+            prefs.edit().putBoolean("udlInstalled", true).apply()
+        }
+        udlFiles.clear()
+        val all = ArrayList<UserLanguage>()
+        for (file in (folder.listFiles() ?: emptyArray()).sortedBy { it.name }) {
+            val found = runCatching { file.inputStream().use { UserLanguages.read(it) } }.getOrDefault(emptyList())
+            for (language in found) {
+                if (language.name in udlFiles) continue
+                udlFiles[language.name] = file
+                all += language
+            }
+        }
+        registry.setUserLanguages(all)
+    }
+
+    private fun reloadUserLanguages() {
+        loadUserLanguages(workspace.languages)
+        workspace.userLanguagesChanged()
+        menuSheet?.refresh()
+    }
+
+    /** Keeps a UDL file with the app and makes its languages available. Returns their names; none if it is not a UDL file. */
+    internal fun importUserLanguages(fileName: String, content: ByteArray): List<String> {
+        val names = UserLanguages.read(content.inputStream()).map { it.name }
+        if (names.isEmpty()) return names
+        val safe = fileName.substringAfterLast('/').removeSuffix(".xml").replace(Regex("[^A-Za-z0-9 ._()+-]"), "_").ifEmpty { "language" }
+        java.io.File(udlFolder(), "$safe.xml").writeBytes(content)
+        prefs.edit().putString("udlCurrent", names.first()).apply()
+        reloadUserLanguages()
+        return names
+    }
+
+    /**
+     * Notepad++'s "Define your language" dialog and its folder of definitions in one list: the languages there
+     * are, and for each what can be done with it. A definition is edited as the XML file it is.
+     */
+    private fun showUserLanguages() = showMenu("User Defined Languages") {
+        item("Import...") { pickFile(REQUEST_IMPORT_UDL) }
+        item("New Language...") {
+            askText("New Language", "Language name", "My language") { name ->
+                if (workspace.languages.byName(name) != null) toast("There is a language called $name already") else {
+                    val file = java.io.File(udlFolder(), name.replace(Regex("[^A-Za-z0-9 ._()+-]"), "_") + ".xml")
+                    file.writeText(UserLanguages.template(name, ""), Charsets.UTF_8)
+                    prefs.edit().putString("udlCurrent", name).apply()
+                    reloadUserLanguages()
+                    menuSheet?.dismiss()
+                    openUris(listOf(Uri.fromFile(file)))
+                    toast("Fill in the lists and save: the language updates each time")
+                }
+            }
+        }
+        for (language in workspace.languages.userLanguages) {
+            val file = udlFiles[language.name] ?: continue
+            sub(language.display) {
+                item("Use for This Document", checked = workspace.active.language === language) { workspace.setLanguage(language) }
+                item("Edit Definition") {
+                    prefs.edit().putString("udlCurrent", language.name).apply()
+                    openUris(listOf(Uri.fromFile(file)))
+                }
+                item("Export...") {
+                    udlToExport = file
+                    createFile(REQUEST_EXPORT_UDL, file.name)
+                }
+                item("Remove") {
+                    file.delete()
+                    reloadUserLanguages()
+                }
+            }
+        }
+    }
+
+    // endregion
 
     private fun MenuSpec.settingsMenu() {
         item("Preferences...") { showPreferences() }
@@ -1846,6 +2034,7 @@ class MainActivity : Activity() {
             refreshTabs()
             editor.requestFocus()
         }
+        workspace.languages.darkTheme = theme.isDark
         workspace.theme = theme
         root.setBackgroundColor(theme.background or 0xFF000000.toInt())
     }
@@ -2823,14 +3012,18 @@ class MainActivity : Activity() {
         // Read again each time the panel opens: the text may have changed since.
         functionListing = null
         sidePanel = SidePanel(themed, palette.dark).also { panel ->
-            panel.show(
-                listOf(
-                    SidePanel.Page(PANEL_DOCUMENTS) { documentRows() },
-                    SidePanel.Page(PANEL_FOLDERS) { folderRows() },
-                    SidePanel.Page(PANEL_FUNCTIONS) { functionRows() },
-                ),
-                page,
+            val pages = arrayListOf(
+                SidePanel.Page(PANEL_DOCUMENTS) { documentRows() },
+                SidePanel.Page(PANEL_FOLDERS) { folderRows() },
+                SidePanel.Page(PANEL_FUNCTIONS) { functionRows() },
             )
+            // A Project Panel has its tab once it was asked for or holds something.
+            for (index in 0 until PROJECT_PANELS) {
+                if (index in openedProjectPanels || projectPanel(index).isNotEmpty()) {
+                    pages += SidePanel.Page(projectPanelTitle(index)) { projectRows(index) }
+                }
+            }
+            panel.show(pages, page)
         }
     }
 
@@ -3042,6 +3235,200 @@ class MainActivity : Activity() {
     }
 
     internal val callHint: String get() = if (callHintView.visibility == View.VISIBLE) callHintView.text.toString() else ""
+
+    // endregion
+
+    // region Project Panels
+
+    // Notepad++'s three Project Panels, each a workspace file of projects, folders and files kept with the app.
+    private val projectPanels = arrayOfNulls<MutableList<ProjectNode>>(PROJECT_PANELS)
+    private val openedProjectPanels = HashSet<Int>()
+    private val closedProjectNodes: MutableSet<ProjectNode> = java.util.Collections.newSetFromMap(java.util.IdentityHashMap())
+    private var projectTarget: Pair<Int, ProjectNode>? = null
+    private var workspacePanel = 0
+
+    private fun projectPanelTitle(index: Int) = "Project ${index + 1}"
+
+    private fun projectFile(index: Int) = java.io.File(java.io.File(filesDir, "projects").apply { mkdirs() }, "workspace${index + 1}.xml")
+
+    internal fun projectPanel(index: Int): MutableList<ProjectNode> = projectPanels[index] ?: run {
+        val text = runCatching { projectFile(index).readText(Charsets.UTF_8) }.getOrDefault("")
+        ProjectStore.read(text).also { projectPanels[index] = it }
+    }
+
+    private fun saveProjects(index: Int) {
+        runCatching { projectFile(index).writeText(ProjectStore.write(projectPanel(index)), Charsets.UTF_8) }
+        sidePanel?.refresh()
+    }
+
+    internal fun showProjectPanel(index: Int) {
+        openedProjectPanels += index
+        showSidePanel(projectPanelTitle(index))
+    }
+
+    private fun askText(title: String, description: String, initial: String, done: (String) -> Unit) {
+        val input = EditText(themed).apply {
+            contentDescription = description
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(initial)
+            selectAll()
+        }
+        val container = LinearLayout(themed).apply {
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        AlertDialog.Builder(themed)
+            .setTitle(title)
+            .setView(container)
+            .setPositiveButton(android.R.string.ok) { _, _ -> input.text.toString().trim().takeIf { it.isNotEmpty() }?.let(done) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun PanelSpec.projectRows(index: Int) {
+        val projects = projectPanel(index)
+        action("New Project") {
+            askText("New Project", "Project name", "Project ${projects.size + 1}") { name ->
+                projects += ProjectNode(ProjectNode.Kind.PROJECT, name)
+                saveProjects(index)
+            }
+        }
+        action("Open...") {
+            workspacePanel = index
+            pickFile(REQUEST_OPEN_WORKSPACE)
+        }
+        action("Save As...") {
+            workspacePanel = index
+            createFile(REQUEST_SAVE_WORKSPACE, "workspace${index + 1}.xml")
+        }
+        if (projects.isEmpty()) row("Make a project to keep a set of files together.", dimmed = true)
+        for (project in projects) projectRow(index, project, 0)
+    }
+
+    private fun PanelSpec.projectRow(index: Int, node: ProjectNode, depth: Int) {
+        if (node.kind == ProjectNode.Kind.FILE) {
+            row(node.name, depth, onLongClick = { projectNodeMenu(index, node) }) {
+                sidePanel?.dismiss()
+                openProjectFile(node)
+            }
+            return
+        }
+        val open = node !in closedProjectNodes
+        row(
+            node.name, depth, mark = if (open) "\u25BE" else "\u25B8", strong = node.kind == ProjectNode.Kind.PROJECT,
+            onLongClick = { projectNodeMenu(index, node) },
+        ) {
+            if (open) closedProjectNodes += node else closedProjectNodes -= node
+            sidePanel?.refresh()
+        }
+        if (open) for (child in node.children) projectRow(index, child, depth + 1)
+    }
+
+    private fun openProjectFile(node: ProjectNode) {
+        val path = node.path
+        val uri = when {
+            path.startsWith("content://") || path.startsWith("file://") -> Uri.parse(path)
+            path.startsWith("/") -> Uri.fromFile(java.io.File(path))
+            // Workspace files made by Notepad++ on Windows list paths this device does not have.
+            else -> return toast("This phone has no file at ${path.take(80)}")
+        }
+        openUris(listOf(uri))
+    }
+
+    private fun projectNodeMenu(index: Int, node: ProjectNode) = showMenu(node.name) {
+        val siblings = node.parent?.children ?: projectPanel(index)
+        val place = siblings.indexOf(node)
+        if (node.kind != ProjectNode.Kind.FILE) {
+            val doc = workspace.active
+            item("Add Current File", enabled = doc.uri != null) {
+                node.add(ProjectNode(ProjectNode.Kind.FILE, doc.name, doc.uri.toString()))
+                saveProjects(index)
+            }
+            item("Add All Open Files", enabled = workspace.docs.any { it.uri != null }) {
+                val listed = node.children.map { it.path }.toSet()
+                for (open in workspace.docs) {
+                    val uri = open.uri?.toString() ?: continue
+                    if (uri !in listed) node.add(ProjectNode(ProjectNode.Kind.FILE, open.name, uri))
+                }
+                saveProjects(index)
+            }
+            item("Add Files...") {
+                projectTarget = index to node
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+                try {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(intent, REQUEST_PROJECT_FILES)
+                } catch (e: Exception) {
+                    toast("No file picker is available on this device")
+                }
+            }
+            item("Add Folder...") {
+                askText("Add Folder", "Folder name", "Folder") { name ->
+                    node.add(ProjectNode(ProjectNode.Kind.FOLDER, name))
+                    closedProjectNodes -= node
+                    saveProjects(index)
+                }
+            }
+        }
+        item("Rename...") {
+            askText("Rename", "New name", node.name) { name ->
+                node.name = name
+                saveProjects(index)
+            }
+        }
+        item("Move Up", enabled = place > 0) {
+            node.move(siblings, -1)
+            saveProjects(index)
+        }
+        item("Move Down", enabled = place in 0 until siblings.size - 1) {
+            node.move(siblings, 1)
+            saveProjects(index)
+        }
+        item("Remove") {
+            val parent = node.parent
+            if (parent != null) parent.remove(node) else siblings.remove(node)
+            saveProjects(index)
+        }
+    }
+
+    // endregion
+
+    // region Document Map
+
+    /** View > Document Map: shows or hides the small view of the whole document beside the editor. */
+    internal fun setDocumentMap(on: Boolean) {
+        prefs.edit().putBoolean("documentMap", on).apply()
+        val current = documentMap
+        if (on && current == null) {
+            val map = DocumentMap(this, editor, palette.accent)
+            documentMap = map
+            editorRow.addView(map, LinearLayout.LayoutParams(dp(MAP_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
+            styleDocumentMap()
+        } else if (!on && current != null) {
+            documentMap = null
+            editorRow.removeView(current)
+            current.detach()
+        }
+    }
+
+    /** The map shows the document of the tab on screen, in that tab's colours and in very small print. */
+    private fun styleDocumentMap() {
+        val map = documentMap ?: return
+        map.attach()
+        workspace.styleOther(
+            map.view,
+            ViewMetrics(
+                fontName = fontName, fontSize = MAP_FONT_SIZE, foldMarginWidth = 0, leftPadding = 0,
+                showLineNumbers = false, pixelScale = resources.displayMetrics.density,
+            ),
+        )
+        map.plain()
+        map.sync()
+    }
 
     // endregion
 
@@ -3425,7 +3812,15 @@ class MainActivity : Activity() {
         const val REQUEST_FIND_FOLDER = 6
         const val REQUEST_IMPORT_THEME = 7
         const val REQUEST_WORKSPACE_FOLDER = 8
+        const val REQUEST_PROJECT_FILES = 9
+        const val REQUEST_OPEN_WORKSPACE = 10
+        const val REQUEST_SAVE_WORKSPACE = 11
+        const val REQUEST_IMPORT_UDL = 12
+        const val REQUEST_EXPORT_UDL = 13
+        const val PROJECT_PANELS = 3
         const val PANEL_DOCUMENTS = "Documents"
+        const val MAP_WIDTH_DP = 72f
+        const val MAP_FONT_SIZE = 3
         const val PANEL_FOLDERS = "Folders"
         const val PANEL_FUNCTIONS = "Functions"
         const val MAX_FUNCTION_LIST_BYTES = 3L * 1024 * 1024

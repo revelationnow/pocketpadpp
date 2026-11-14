@@ -64,6 +64,17 @@ class ScintillaView @JvmOverloads constructor(
     private val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
     private val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
+    /**
+     * True for a view that only shows a document: no caret handles, no gestures and no keyboard of its own.
+     * The Document Map is one.
+     */
+    var displayOnly = false
+        set(value) {
+            field = value
+            isFocusable = !value
+            isFocusableInTouchMode = !value
+        }
+
     /** Called after the caret, selection, text or scroll position changed. Safe to query the editor from here. */
     var onStateChanged: (() -> Unit)? = null
 
@@ -346,6 +357,7 @@ class ScintillaView @JvmOverloads constructor(
         ScintillaNative.paint(ptr, surface)
         surface.canvas = null
         canvas.restore()
+        if (displayOnly) return
         drawHandles(canvas)
         drawScrollBar(canvas)
     }
@@ -652,7 +664,7 @@ class ScintillaView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (ptr == 0L) return false
+        if (ptr == 0L || displayOnly) return false
         val x = event.x
         val y = event.y
         when (event.actionMasked) {
@@ -922,7 +934,7 @@ class ScintillaView @JvmOverloads constructor(
 
     // region Soft keyboard
 
-    override fun onCheckIsTextEditor(): Boolean = true
+    override fun onCheckIsTextEditor(): Boolean = !displayOnly
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         if (ptr == 0L) return null

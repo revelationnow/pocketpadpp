@@ -2104,6 +2104,183 @@ class WalkthroughTest {
         onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
     }
 
+    @Test
+    fun documentMap() {
+        fun mapLine() = onUi { it.documentMap!!.view.send(Sci.SCI_GETFIRSTVISIBLELINE) }
+        val text = (1..400).joinToString("\n") { "line_$it = value(${it * 3})  # note $it" }
+        setText(text, "python")
+        openMenu("View", "Document Map")
+        tapDescribed("Close menu")
+        assertNotNull(onUi { it.documentMap })
+        assertTrue("the map shows the editor's document", onUi { it.documentMap!!.view.send(Sci.SCI_GETDOCPOINTER) == it.editor.send(Sci.SCI_GETDOCPOINTER) })
+        assertTrue("in much smaller print", onUi { it.documentMap!!.view.send(Sci.SCI_LINESONSCREEN) > 2 * it.editor.send(Sci.SCI_LINESONSCREEN) })
+        shot("document-map")
+
+        // The map follows the editor, and its mark shows which part is on screen.
+        assertEquals(0L, mapLine())
+        sci(Sci.SCI_SETFIRSTVISIBLELINE, 300)
+        waitUntil("the map to follow the editor") { mapLine() > 0 }
+        val (top, bottom) = onUi { it.documentMap!!.mark }
+        assertTrue("the mark is on the map: $top to $bottom", top > 0 && bottom > top)
+        shot("document-map-scrolled")
+
+        // A touch on the map takes the editor there.
+        val bounds = device.findObject(By.desc("Document map")).visibleBounds
+        device.click(bounds.centerX(), bounds.top + 12)
+        waitUntil("the editor to go where the map was touched") { sci(Sci.SCI_GETFIRSTVISIBLELINE) < 250 }
+
+        // What is typed shows in the map, and the map goes with the tab.
+        sci(Sci.SCI_DOCUMENTSTART)
+        onUi { it.editor.typeText("NEW ") }
+        assertTrue(onUi { it.documentMap!!.view.text.startsWith("NEW line_1") })
+        tap("New")
+        assertTrue("the map shows the new tab", onUi { it.documentMap!!.view.send(Sci.SCI_GETDOCPOINTER) == it.editor.send(Sci.SCI_GETDOCPOINTER) })
+        assertEquals("", onUi { it.documentMap!!.view.text })
+
+        // It is still there after a restart, and can be closed again.
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        device.waitForIdle()
+        assertNotNull("the map is remembered", onUi { it.documentMap })
+        openMenu("View", "Document Map")
+        tapDescribed("Close menu")
+        assertNull(onUi { it.documentMap })
+        assertTrue(device.findObject(By.desc("Document map")) == null)
+        onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
+    }
+
+    @Test
+    fun projectPanels() {
+        fun active() = onUi { it.workspace.active.name }
+        fun name(description: String, value: String) {
+            device.wait(Until.findObject(By.desc(description)), 4000)!!.text = value
+            tapButton("OK")
+        }
+        val projects = File(context.filesDir, "projects")
+        projects.deleteRecursively()
+        val chapter = File(context.cacheDir, "chapter.txt").apply { writeText("Once upon a time\n") }
+        try {
+            onUi { it.openUris(listOf(Uri.fromFile(chapter))) }
+            waitUntil("the file to open") { active() == "chapter.txt" }
+
+            // A project with a folder, and the open file put into it.
+            openMenu("View", "Project Panels", "Project Panel 1")
+            tap("New Project")
+            name("Project name", "Book")
+            panelRow("Book").longClick()
+            tap("Add Folder...")
+            name("Folder name", "Drafts")
+            panelRow("Drafts").longClick()
+            tap("Add Current File")
+            panelRow("chapter.txt")
+            panelRow("Book").longClick()
+            tap("Rename...")
+            name("New name", "Novel")
+            panelRow("Novel")
+            shot("project-panel")
+            tapDescribed("Close panel")
+
+            // The file opens from the project after its tab was closed.
+            tapDescribed("Close chapter.txt")
+            assertTrue(active() != "chapter.txt")
+            openMenu("View", "Project Panels", "Project Panel 1")
+            panelRow("chapter.txt").click()
+            waitUntil("the file to open from the project") { active() == "chapter.txt" }
+
+            // Projects are kept, each panel on its own, and a panel that holds something has its tab.
+            scenario.close()
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            device.waitForIdle()
+            assertEquals(listOf("Novel"), onUi { activity -> activity.projectPanel(0).map { it.name } })
+            assertEquals(listOf("chapter.txt"), onUi { activity -> activity.projectPanel(0)[0].files().map { it.name } })
+            assertTrue(onUi { it.projectPanel(1).isEmpty() })
+            openMenu("View", "Document List")
+            tap("Project 1")
+            panelRow("Novel").longClick()
+            tap("Remove")
+            assertTrue(onUi { it.projectPanel(0).isEmpty() })
+            tapDescribed("Close panel")
+        } finally {
+            projects.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun userDefinedLanguages() {
+        fun active() = onUi { it.workspace.active.name }
+        fun names() = onUi { activity -> activity.workspace.languages.userLanguages.map { it.name } }
+        val folder = File(context.filesDir, "userDefineLangs")
+        val notes = File(context.cacheDir, "notes.md").apply { writeText("# Title\n\nplain words\n") }
+        val tiny = """<NotepadPlus>
+    <UserLang name="Tiny" ext="tiny" udlVersion="2.1">
+        <Settings>
+            <Global caseIgnored="no" allowFoldOfComments="no" foldCompact="no" forcePureLC="0" decimalSeparator="0" />
+            <Prefix Keywords1="no" Keywords2="no" Keywords3="no" Keywords4="no" Keywords5="no" Keywords6="no" Keywords7="no" Keywords8="no" />
+        </Settings>
+        <KeywordLists>
+            <Keywords name="Comments">00// 01 02 03/* 04*/</Keywords>
+            <Keywords name="Keywords1">let print</Keywords>
+        </KeywordLists>
+        <Styles>
+            <WordsStyle name="DEFAULT" fgColor="000000" bgColor="FFFFFF" fontStyle="0" nesting="0" />
+            <WordsStyle name="LINE COMMENTS" fgColor="008000" bgColor="FFFFFF" fontStyle="2" nesting="0" />
+            <WordsStyle name="KEYWORDS1" fgColor="0000FF" bgColor="FFFFFF" fontStyle="1" nesting="0" />
+        </Styles>
+    </UserLang>
+</NotepadPlus>"""
+        try {
+            // Notepad++'s own Markdown definition comes with the app and answers for .md files.
+            onUi { it.openUris(listOf(Uri.fromFile(notes))) }
+            waitUntil("the file to open") { active() == "notes.md" }
+            assertTrue("Markdown is recognised: ${onUi { it.workspace.active.language.name }}", onScreen("Markdown (preinstalled)"))
+            sci(Sci.SCI_COLOURISE, 0, -1)
+            assertTrue("the heading is styled apart from the text", sci(Sci.SCI_GETSTYLEAT, 0) != sci(Sci.SCI_GETSTYLEAT, 10))
+            shot("udl-markdown")
+
+            // A definition file of one's own.
+            assertEquals(listOf("Tiny"), onUi { it.importUserLanguages("tiny.xml", tiny.toByteArray()) })
+            assertEquals("other files are turned down", emptyList<String>(), onUi { it.importUserLanguages("x.xml", "<a/>".toByteArray()) })
+            tap("New")
+            setText("let x = 1 // note", "Tiny")
+            sci(Sci.SCI_COLOURISE, 0, -1)
+            assertEquals("a keyword of the language", 4L, sci(Sci.SCI_GETSTYLEAT, 0))
+            assertEquals("its line comment", 2L, sci(Sci.SCI_GETSTYLEAT, 12))
+            assertEquals("the keyword in the definition's colour (blue, as BGR)", 0xFF0000L, sci(Sci.SCI_STYLEGETFORE, 4))
+            openMenu("Edit", "Comment/Uncomment", "Toggle Single Line Comment")
+            assertEquals("commenting uses the language's own mark", "// let x = 1 // note", text())
+            sci(Sci.SCI_UNDO)
+            tapDescribed("Menu")
+            menu("Language")
+            menu("Tiny")
+            shot("udl-language-menu")
+            tapDescribed("Close menu")
+
+            // Editing the definition: it is a file like any other, and saving it brings the change in.
+            openMenu("Language", "User Defined Language", "Define your language...")
+            shot("udl-manager")
+            menu("Tiny")
+            menu("Edit Definition")
+            waitUntil("the definition to open") { active() == "tiny.xml" }
+            onUi { it.editor.text = it.editor.text.replace("let print", "let print fn") }
+            tap("Save")
+            waitUntil("the definition to be saved") { !onUi { it.workspace.isDirty(it.workspace.active) } }
+            tap("New")
+            setText("fn y", "Tiny")
+            sci(Sci.SCI_COLOURISE, 0, -1)
+            assertEquals("the new keyword is known", 4L, sci(Sci.SCI_GETSTYLEAT, 0))
+
+            // Removing it leaves its documents as normal text.
+            openMenu("Language", "User Defined Language", "Define your language...")
+            menu("Tiny")
+            menu("Remove")
+            assertTrue("Tiny" !in names())
+            assertEquals("normal", onUi { it.workspace.active.language.name })
+            onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
+
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */
     @Test
     fun readmeScreens() {

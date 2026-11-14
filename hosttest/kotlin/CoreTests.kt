@@ -25,10 +25,13 @@ import io.github.revelationnow.pocketpadpp.core.SciApi
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
 import io.github.revelationnow.pocketpadpp.core.Searcher
 import io.github.revelationnow.pocketpadpp.core.Session
+import io.github.revelationnow.pocketpadpp.core.ProjectNode
+import io.github.revelationnow.pocketpadpp.core.ProjectStore
 import io.github.revelationnow.pocketpadpp.core.RunCommand
 import io.github.revelationnow.pocketpadpp.core.SessionEntry
 import io.github.revelationnow.pocketpadpp.core.SessionStore
 import io.github.revelationnow.pocketpadpp.core.TextEncodings
+import io.github.revelationnow.pocketpadpp.core.UserLanguages
 import io.github.revelationnow.pocketpadpp.core.TextTransforms
 import io.github.revelationnow.pocketpadpp.core.ThemeApplier
 import io.github.revelationnow.pocketpadpp.core.ViewMetrics
@@ -940,6 +943,146 @@ private fun testCompletion(assets: File) {
     eq(0 to emptyList<String>(), Completion.paths("/missing/x", { listing[it] }), "an unreadable folder offers nothing")
 }
 
+private fun testProjects() {
+    // A workspace file as Notepad++ writes it.
+    val npp = """<NotepadPlus>
+    <Project name="Web &amp; App">
+        <Folder name="src">
+            <Folder name="deep" />
+            <File name="src\main.c" />
+            <File name="C:\work\util.h" />
+        </Folder>
+        <File name="readme.txt" />
+    </Project>
+    <Project name="Notes" />
+</NotepadPlus>"""
+    val projects = ProjectStore.read(npp)
+    eq(listOf("Web & App", "Notes"), projects.map { it.name }, "projects of a Notepad++ workspace file")
+    val src = projects[0].children[0]
+    eq(listOf("deep", "main.c", "util.h"), src.children.map { it.name }, "folders and files, files named by the last part of their path")
+    eq("src\\main.c", src.children[1].path, "a file keeps its path")
+    eq(listOf("main.c", "util.h", "readme.txt"), projects[0].files().map { it.name }, "all files of a project")
+    ok(src.children[1].parent === src && src.parent === projects[0], "nodes know their parent")
+    eq(npp.replace(Regex("\\s+"), ""), ProjectStore.write(projects).substringAfter("?>").replace(Regex("\\s+"), ""), "writing gives the same file back")
+
+    // Files added here are document addresses, which carry no readable name.
+    val project = ProjectNode(ProjectNode.Kind.PROJECT, "Phone")
+    val folder = project.add(ProjectNode(ProjectNode.Kind.FOLDER, "docs"))
+    folder.add(ProjectNode(ProjectNode.Kind.FILE, "todo \"now\".txt", "content://provider/document/123"))
+    folder.add(ProjectNode(ProjectNode.Kind.FILE, "b.txt", "content://provider/document/b.txt"))
+    val again = ProjectStore.read(ProjectStore.write(listOf(project)))
+    eq("todo \"now\".txt" to "content://provider/document/123", again[0].children[0].children[0].let { it.name to it.path }, "a name is kept beside an address")
+    ok(!ProjectStore.write(listOf(project)).contains("label=\"b.txt\""), "no label where the address ends in the name")
+
+    ok(folder.children[1].move(folder.children, -1), "move up")
+    eq(listOf("b.txt", "todo \"now\".txt"), folder.children.map { it.name }, "moved one place up")
+    ok(!folder.children[0].move(folder.children, -1), "the first cannot move up")
+    folder.remove(folder.children[0])
+    eq(1, folder.children.size, "removed")
+    eq(emptyList<String>(), ProjectStore.read("this is not xml").map { it.name }, "an unreadable workspace file is empty")
+    eq(emptyList<String>(), ProjectStore.read("").map { it.name }, "an empty workspace file is empty")
+}
+
+private fun testUserLanguages(assets: File, registry: LanguageRegistry, theme: NppTheme) {
+    val tiny = """<NotepadPlus>
+    <UserLang name="Tiny" ext="tiny tn" udlVersion="2.1">
+        <Settings>
+            <Global caseIgnored="no" allowFoldOfComments="no" foldCompact="no" forcePureLC="0" decimalSeparator="0" />
+            <Prefix Keywords1="no" Keywords2="yes" Keywords3="no" Keywords4="no" Keywords5="no" Keywords6="no" Keywords7="no" Keywords8="no" />
+        </Settings>
+        <KeywordLists>
+            <Keywords name="Comments">00// 01 02 03/* 04*/</Keywords>
+            <Keywords name="Operators1">+ - =</Keywords>
+            <Keywords name="Folders in code1, open">begin</Keywords>
+            <Keywords name="Folders in code1, close">end</Keywords>
+            <Keywords name="Keywords1">let print &quot;go to&quot;</Keywords>
+            <Keywords name="Keywords2">${'$'}</Keywords>
+            <Keywords name="Delimiters">00&quot; 01 02&quot; 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23</Keywords>
+        </KeywordLists>
+        <Styles>
+            <WordsStyle name="DEFAULT" fgColor="000000" bgColor="FFFFFF" fontStyle="0" nesting="0" />
+            <WordsStyle name="LINE COMMENTS" fgColor="008000" bgColor="FFFFFF" colorStyle="1" fontStyle="2" nesting="0" />
+            <WordsStyle name="KEYWORDS1" fgColor="0000FF" bgColor="FFFFFF" fontStyle="1" nesting="0" />
+            <WordsStyle name="DELIMITERS1" fgColor="808080" bgColor="FFFFFF" fontStyle="0" nesting="4" />
+            <WordsStyle name="NOT A STYLE" fgColor="FF0000" />
+        </Styles>
+    </UserLang>
+    <UserLang ext="x"><Settings /><KeywordLists /><Styles /></UserLang>
+    <UserLang name="Broken" ext="x"><Settings /></UserLang>
+</NotepadPlus>"""
+    val languages = UserLanguages.read(tiny.byteInputStream())
+    eq(listOf("Tiny"), languages.map { it.name }, "a language needs a name and all three sections")
+    val language = languages[0]
+    eq(listOf("tiny", "tn"), language.extensions, "extensions of a user-defined language")
+    eq(Triple("//", "/*", "*/"), Triple(language.commentLine, language.commentStart, language.commentEnd), "comment marks for the comment commands")
+    ok(language.isPrefix[1] && !language.isPrefix[0], "prefix mode per keyword group")
+
+    val plan = UserLanguages.plan(language)
+    eq("user", plan.lexer, "user-defined languages use Notepad++'s own lexer")
+    eq("00// 01 02 03/* 04*/", plan.properties.first { it.first == "userDefine.comments" }.second, "comment list goes as a property")
+    eq("4", plan.properties.first { it.first == "userDefine.nesting.16" }.second, "nesting of a delimiter style")
+    eq("let print go\u000Bto", plan.keywordSets[7], "keyword groups go as keyword sets, phrases joined by a marker")
+    eq(15, plan.keywordSets.size, "the fifteen lists that are not properties")
+    val comment = plan.styles.first { it.styleId == 2 }
+    ok(comment.fg == 0x008000 && comment.bg == null && comment.italic, "a style may use only its foreground colour")
+    eq(24, plan.styles.size, "every style of the lexer is there, defined or not")
+    eq("a\bb c", UserLanguages.phrases("'a b' c"), "single-quoted phrases get their own marker")
+    eq("it's", UserLanguages.phrases("it\\'s"), "an escaped quote is a plain character")
+
+    val sci = HostSci()
+    ok(sci.setLexer("user"), "the user-defined-language lexer is built in")
+    LanguageSetup.applyToDocument(sci, plan)
+    sci.sendStrings(Sci.SCI_SETPROPERTY, "userDefine.currentBufferID", "7")
+    val code = "let x = 12 // note\nprint \"hi\" ${'$'}var\nbegin\n  y\nend\n/* block */\n"
+    sci.text = code
+    sci.send(Sci.SCI_COLOURISE, 0, -1)
+    fun style(needle: String) = sci.send(Sci.SCI_GETSTYLEAT, code.indexOf(needle).toLong())
+    eq(4L, style("let"), "keyword of group 1")
+    eq(4L, style("print"), "second keyword of group 1")
+    eq(3L, style("12"), "number")
+    eq(12L, style("="), "operator")
+    eq(2L, style("// note"), "line comment")
+    eq(16L, style("\"hi"), "delimiter 1")
+    eq(5L, style("${'$'}var"), "prefix keyword of group 2")
+    eq(13L, style("begin"), "fold opener")
+    eq(1L, style("/* block"), "block comment")
+    eq(0L, style("x ="), "anything else is default")
+    ok(sci.send(Sci.SCI_GETFOLDLEVEL, 3) and Sci.SC_FOLDLEVELNUMBERMASK.toLong() > sci.send(Sci.SCI_GETFOLDLEVEL, 2) and Sci.SC_FOLDLEVELNUMBERMASK.toLong(), "begin and end fold what is between them")
+    ThemeApplier.apply(sci, theme, plan, ViewMetrics())
+    eq(ThemeApplier.sciColour(0x0000FF), sci.send(Sci.SCI_STYLEGETFORE, 4), "the definition's colours are used")
+    eq(1L, sci.send(Sci.SCI_STYLEGETBOLD, 4), "and its font styles")
+
+    // Notepad++'s own Markdown definitions, one for light themes and one for dark ones.
+    val markdown = File(assets, "userDefineLangs").listFiles { f -> f.name.endsWith(".xml") }!!.sortedBy { it.name }
+        .flatMap { file -> file.inputStream().use { UserLanguages.read(it) } }
+    eq(listOf(false, true), markdown.map { it.darkModeTheme }, "the bundled Markdown definitions: light and dark")
+    registry.setUserLanguages(markdown + languages)
+    registry.darkTheme = false
+    eq(markdown[0].name, registry.forFileName("notes.md").name, "a file extension picks the definition for the theme in use")
+    registry.darkTheme = true
+    eq(markdown[1].name, registry.forFileName("NOTES.MD").name, "and the dark one in a dark theme")
+    eq("Tiny", registry.forFileName("a.tn").name, "a definition with only one variant is used either way")
+    eq("cpp", registry.forFileName("a.cpp").name, "built-in languages still answer for their extensions")
+    ok(registry.byName("Tiny")?.user === languages[0], "user-defined languages are found by name")
+    eq("//", registry.byName("Tiny")!!.commentLine, "and carry their comment marks")
+    val md = LanguageSetup.plan(registry.byName(markdown[0].name)!!, registry, theme)
+    val page = "# Title\nplain words\n"
+    val view = HostSci()
+    LanguageSetup.applyToDocument(view, md)
+    view.text = page
+    view.send(Sci.SCI_COLOURISE, 0, -1)
+    ok(view.send(Sci.SCI_GETSTYLEAT, 0) != view.send(Sci.SCI_GETSTYLEAT, page.indexOf("plain").toLong()), "a Markdown heading is styled apart from plain text")
+    registry.setUserLanguages(emptyList())
+    registry.darkTheme = false
+    eq("normal", registry.forFileName("notes.md").name, "without definitions the extension means nothing")
+    eq(emptyList<String>(), UserLanguages.read("nonsense".byteInputStream()).map { it.name }, "an unreadable definition file is empty")
+    val fresh = UserLanguages.read(UserLanguages.template("My <new> language", "abc xyz").byteInputStream())
+    eq(listOf("My <new> language"), fresh.map { it.name }, "the template for a new language is a definition file")
+    eq(listOf("abc", "xyz"), fresh[0].extensions, "with the extensions asked for")
+    eq(24, UserLanguages.plan(fresh[0]).styles.size, "and every style")
+    ok(UserLanguages.template("x", "").split("<Keywords ").size - 1 == 28, "the template names all 28 lists")
+}
+
 fun main(args: Array<String>) {
     val assets = File(args.firstOrNull() ?: "app/src/main/assets/npp")
     ScintillaNative.init(HostPlatform(), 2.0f, 48f)
@@ -954,6 +1097,8 @@ fun main(args: Array<String>) {
     testSettings(registry, theme)
     testFunctionList(assets, File(args.getOrNull(1) ?: "hosttest/data/functionList"))
     testCompletion(assets)
+    testProjects()
+    testUserLanguages(assets, registry, theme)
     println("core: ${checks - failures}/$checks checks passed")
     exitProcess(if (failures == 0) 0 else 1)
 }

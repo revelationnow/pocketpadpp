@@ -34,6 +34,7 @@ object LanguageSetup {
             return (user + " " + source.keywordsOf(classIndex)).trim()
         }
 
+        language.user?.let { return UserLanguages.plan(it) }
         val doxygen = registry.byName("cpp")?.keywordsOf(TYPE2) ?: ""
         val styles = theme.lexerStyles(language.name)
 
