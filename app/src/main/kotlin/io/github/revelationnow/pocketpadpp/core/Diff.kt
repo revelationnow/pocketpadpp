@@ -235,6 +235,9 @@ object Compare {
         )) {
             sci.send(Sci.SCI_MARKERDEFINE, marker.toLong(), Sci.SC_MARK_BACKGROUND.toLong())
             sci.send(Sci.SCI_MARKERSETBACK, marker.toLong(), tint)
+            // Drawn over the caret line's own colour, so that the line the caret is on shows what it is too.
+            sci.send(Sci.SCI_MARKERSETLAYER, marker.toLong(), Sci.SC_LAYER_UNDER_TEXT.toLong())
+            sci.send(Sci.SCI_MARKERSETALPHA, marker.toLong(), 255)
         }
         sci.send(Sci.SCI_MARKERDEFINE, GAP.toLong(), Sci.SC_MARK_EMPTY.toLong())
         sci.send(Sci.SCI_INDICSETSTYLE, INDICATOR.toLong(), Sci.INDIC_STRAIGHTBOX.toLong())
