@@ -2581,7 +2581,20 @@ class WalkthroughTest {
             assertEquals("and below for the two lines only above", 2L, other.send(Sci.SCI_ANNOTATIONGETLINES, 4))
         }
         assertEquals("the view goes to the first difference", 1L, line())
+        assertTrue("added lines are tinted green", countPixels(0xD7F5CF, 14) > 5000)
+        assertTrue("the changed line is tinted yellow", countPixels(0xFFF1B8, 14) > 2000)
         shot("compare")
+
+        // The marks stay through a change of theme, in colours for the dark.
+        openMenu("Settings", "Dark mode")
+        waitUntil("the screen to turn dark") { brightness(sci(Sci.SCI_STYLEGETBACK, Sci.STYLE_DEFAULT.toLong())) < 128 }
+        tapDescribed("Close menu")
+        assertEquals(3, differences())
+        assertTrue(onUi { marked(it.editor, 1, 10) && marked(it.otherView!!, 3, 11) })
+        shot("compare-dark")
+        openMenu("Settings", "Dark mode")
+        waitUntil("the screen to turn light") { brightness(sci(Sci.SCI_STYLEGETBACK, Sci.STYLE_DEFAULT.toLong())) > 128 }
+        tapDescribed("Close menu")
 
         // From one difference to the next and back.
         tapDescribed("Next difference")

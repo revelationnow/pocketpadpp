@@ -1169,6 +1169,26 @@ private fun testCompare() {
     ok(right.send(Sci.SCI_INDICATORVALUEAT, Compare.INDICATOR.toLong(), right.send(Sci.SCI_POSITIONFROMLINE, 2) + 4) != 0L, "the changed characters are marked")
     eq(0L, right.send(Sci.SCI_INDICATORVALUEAT, Compare.INDICATOR.toLong(), right.send(Sci.SCI_POSITIONFROMLINE, 2) + 1), "the unchanged ones are not")
 
+    // As drawn: the tint is on the line, and still there when the caret's own line colour is under it.
+    ScintillaNative.resize(right.ptr, 600, 400)
+    fun pixel(line: Long): Int {
+        val surface = HostSurface(600, 400)
+        ScintillaNative.paint(right.ptr, surface)
+        val y = right.send(Sci.SCI_POINTYFROMPOSITION, 0, right.send(Sci.SCI_POSITIONFROMLINE, line)).toInt() + 3
+        return surface.image.getRGB(590, y) and 0xFFFFFF
+    }
+    right.send(Sci.SCI_GOTOLINE, 0)
+    val plain = pixel(3)
+    ok(pixel(5) != plain, "an added line is tinted where it is drawn")
+    ok(pixel(2) != plain && pixel(2) != pixel(5), "a changed line has a tint of its own")
+    right.send(Sci.SCI_SETELEMENTCOLOUR, Sci.SC_ELEMENT_CARET_LINE_BACK.toLong(), 0xFFFFE8E8)
+    right.send(Sci.SCI_SETCARETLINEVISIBLEALWAYS, 1)
+    right.send(Sci.SCI_GOTOLINE, 3)
+    val caretLine = pixel(3)
+    ok(caretLine != plain, "the line the caret is on has its own colour")
+    right.send(Sci.SCI_GOTOLINE, 5)
+    ok(pixel(5) != caretLine && pixel(5) != plain, "an added line still shows as one when the caret is on it")
+
     // Going from one difference to the next.
     val places = Compare.places(rows)
     eq(listOf(1, 3, 5), places, "where the differences are in the new text; a removal counts at the line it follows")

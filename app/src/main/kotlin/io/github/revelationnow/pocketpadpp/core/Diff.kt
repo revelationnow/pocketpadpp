@@ -225,20 +225,28 @@ object Compare {
     const val GAP = 13
     const val INDICATOR = 20
     const val GAP_STYLE = 250
+
+    /** How strongly a line is tinted, out of 255. */
+    private const val TINT_ALPHA = 160L
     private const val MASK = ((1 shl ADDED) or (1 shl REMOVED) or (1 shl CHANGED) or (1 shl GAP)).toLong()
 
     /** Colours and marks belong to a view, so this is for every view that shows a compared document. */
     fun setup(sci: SciApi, dark: Boolean) {
         fun colour(light: Int, darker: Int) = ThemeApplier.sciColour(if (dark) darker else light)
+        // The tints are laid over the line, see-through, rather than being its background: that way the line the
+        // caret is on and a selection keep their own colour underneath and still show what kind of line it is.
         for ((marker, tint) in listOf(
-            ADDED to colour(0xD7F5CF, 0x1F4A22), REMOVED to colour(0xFBD9D9, 0x5A2323), CHANGED to colour(0xFFF1B8, 0x4F4418),
+            ADDED to colour(0xBFEFB2, 0x0C5011), REMOVED to colour(0xF9C2C2, 0x6A1212), CHANGED to colour(0xFFE98E, 0x584701),
         )) {
             sci.send(Sci.SCI_MARKERDEFINE, marker.toLong(), Sci.SC_MARK_BACKGROUND.toLong())
             sci.send(Sci.SCI_MARKERSETBACK, marker.toLong(), tint)
-            // Drawn over the caret line's own colour, so that the line the caret is on shows what it is too.
+            // The layer is set last: setting the alpha moves a marker to the layer over the text.
+            sci.send(Sci.SCI_MARKERSETALPHA, marker.toLong(), TINT_ALPHA)
             sci.send(Sci.SCI_MARKERSETLAYER, marker.toLong(), Sci.SC_LAYER_UNDER_TEXT.toLong())
-            sci.send(Sci.SCI_MARKERSETALPHA, marker.toLong(), 255)
         }
+        // Scintilla only draws a marker on a layer if some margin lists it. In the margin itself this kind draws nothing.
+        val tints = (1L shl ADDED) or (1L shl REMOVED) or (1L shl CHANGED)
+        sci.send(Sci.SCI_SETMARGINMASKN, 1, sci.send(Sci.SCI_GETMARGINMASKN, 1) or tints)
         sci.send(Sci.SCI_MARKERDEFINE, GAP.toLong(), Sci.SC_MARK_EMPTY.toLong())
         sci.send(Sci.SCI_INDICSETSTYLE, INDICATOR.toLong(), Sci.INDIC_STRAIGHTBOX.toLong())
         sci.send(Sci.SCI_INDICSETFORE, INDICATOR.toLong(), colour(0xE08A00, 0xFFC850))
