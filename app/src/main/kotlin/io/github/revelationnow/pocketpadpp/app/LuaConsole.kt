@@ -73,6 +73,10 @@ class LuaConsole(context: Context, private val palette: Palette) : LinearLayout(
             setPadding(dp(10f), dp(4f), dp(10f), dp(4f))
         }
         scroll.addView(output, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // The text is only as tall as its lines once it has been laid out again.
+        output.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) toEnd()
+        }
         addView(scroll, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         val row = LinearLayout(context).apply {
@@ -122,7 +126,12 @@ class LuaConsole(context: Context, private val palette: Palette) : LinearLayout(
     /** Shows the text kept by the owner, and goes to its end. */
     fun show(text: CharSequence) {
         output.text = text
-        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        toEnd()
+    }
+
+    // Scrolled by position: ScrollView's own "go to the end" also takes the keyboard focus, away from the editor.
+    private fun toEnd() {
+        scroll.post { scroll.scrollTo(0, (output.height - scroll.height).coerceAtLeast(0)) }
     }
 
     val text: String get() = output.text.toString()

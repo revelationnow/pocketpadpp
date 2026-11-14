@@ -1288,6 +1288,7 @@ private fun testLua(assets: File) {
     val files = File(assets.parentFile, "lua")
     val printed = ArrayList<String>()
     val asked = ArrayList<String>()
+    val toasts = ArrayList<String>()
     val main = HostSci()
     val other = HostSci()
     var split = true
@@ -1311,8 +1312,9 @@ private fun testLua(assets: File) {
             }
             "open" -> if (args[0] == "/bad") throw IllegalStateException("cannot open /bad") else true
             "toast" -> {
+                toasts += args[0].toString()
                 // The application calling back into Lua while Lua is calling it.
-                engine!!.event("OnSave", "nested.txt", 9L)
+                if (args[0] == "x") engine!!.event("OnSave", "nested.txt", 9L)
                 null
             }
             else -> {
@@ -1503,6 +1505,58 @@ private fun testLua(assets: File) {
         }
         engine.start()
     }
+
+    // The examples that come with the app do what they say.
+    engine.setTimeLimit(5000)
+    val examples = File(files, "examples").listFiles { f -> f.name.endsWith(".lua") }!!.sortedBy { it.name }
+    eq(6, examples.size, "the examples")
+    asked.clear()
+    for (example in examples) {
+        eq(null, engine.run(example.name, example.readText()), "${example.name} loads")
+        eq(null, engine.run(example.name, example.readText()), "${example.name} can be run again")
+    }
+    eq(2, asked.count { it == "watch(OnChar, true)" } - asked.count { it == "watch(OnChar, false)" } + 1, "running a script again replaces its handler rather than adding one")
+    main.text = "one two\nthr\u00e9e"
+    toasts.clear()
+    eq(null, engine.dispatch("shortcut", "Word Count"), "Word Count")
+    eq(listOf("Document: 2 lines, 3 words, 13 characters"), toasts, "counts the document, in characters rather than bytes")
+    main.send(Sci.SCI_SETSEL, 0, 7)
+    engine.dispatch("shortcut", "Word Count")
+    eq("Selection: 1 lines, 2 words, 7 characters", toasts.last(), "or the selection")
+    main.text = ""
+    eq(null, engine.dispatch("shortcut", "Insert Date"), "Insert Date")
+    ok(Regex("\\d{4}-\\d{2}-\\d{2}").matches(main.text), "puts in a date: ${main.text}")
+    main.text = "12 * (3 + 4.5)"
+    main.send(Sci.SCI_SELECTALL)
+    eq(null, engine.dispatch("shortcut", "Calculate Selection"), "Calculate Selection")
+    eq("12 * (3 + 4.5) = 90.0", main.text, "works out the sum")
+    main.text = "os.exit()"
+    main.send(Sci.SCI_SELECTALL)
+    toasts.clear()
+    engine.dispatch("shortcut", "Calculate Selection")
+    ok(main.text == "os.exit()" && toasts.size == 1, "and leaves alone what is not a sum")
+    main.text = "a  \nb\t\nc"
+    eq(null, engine.event("OnBeforeSave", "f.txt", 1L), "Trim on Save")
+    eq("a\nb\nc", main.text, "takes the blanks off line ends")
+    main.send(Sci.SCI_UNDO)
+    eq("a  \nb\t\nc", main.text, "as one step to undo")
+    main.text = ""
+    main.sendText(Sci.SCI_ADDTEXT, 1, "(")
+    eq(null, engine.event("OnChar", "("), "Auto Close Brackets")
+    ok(main.text == "()" && main.send(Sci.SCI_GETCURRENTPOS) == 1L, "closes the bracket and leaves the caret inside: ${main.text}")
+    main.text = "word"
+    main.sendText(Sci.SCI_ADDTEXT, 1, "[")
+    engine.event("OnChar", "[")
+    eq("[word", main.text, "but not in front of a word")
+    ScintillaNative.resize(main.ptr, 600, 400)
+    main.text = "foo bar foo\nfood foo"
+    main.send(Sci.SCI_SETSEL, 0, 3)
+    eq(null, engine.event("OnUpdateUI", 2L), "Highlight Selected Word")
+    fun marked(position: Long) = main.send(Sci.SCI_INDICATORVALUEAT, 12, position) != 0L
+    ok(marked(8) && marked(17) && !marked(0) && !marked(12) && !marked(5), "marks the other places the selected word stands, as a whole word")
+    main.send(Sci.SCI_SETSEL, 0, 0)
+    engine.event("OnUpdateUI", 2L)
+    ok(!marked(8), "and unmarks them when nothing is selected")
 
     // Starting afresh forgets everything scripts set up.
     eq(null, engine.start(), "a fresh interpreter")

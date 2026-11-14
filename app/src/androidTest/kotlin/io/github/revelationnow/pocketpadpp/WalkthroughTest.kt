@@ -2809,6 +2809,7 @@ class WalkthroughTest {
         }
         val startup = onUi { it.startupScript() }
         startup.delete()
+        assertTrue("the editor has the keyboard from the start", onUi { it.editor.hasFocus() })
         val file = File(context.cacheDir, "spaces.txt").apply { writeText("a  \nb\t\nc\n") }
         try {
             // The console: values, the editor, the app, and mistakes.
@@ -2837,6 +2838,21 @@ class WalkthroughTest {
             val unmatched = onUi { it.unknownNppCommands() }
             for (path in unmatched) Log.i(TAG, "npp command without a match: $path")
             Log.i(TAG, "npp commands without a match: ${unmatched.size}")
+            // The dozen tied to Windows, and three that are lists rather than commands here.
+            assertTrue("Notepad++'s commands are found by their ids; not found: $unmatched", unmatched.size <= 15)
+            assertTrue("the editor keeps the keyboard while the console is open", onUi { it.editor.hasFocus() || it.currentFocus?.contentDescription == "Lua input" })
+
+            // An example that comes with the app, run as it is.
+            openMenu("Plugins", "Lua Script", "Examples", "Calculate Selection")
+            waitUntil("the example to open") { onUi { it.workspace.active.name } == "Calculate Selection.lua" }
+            assertEquals("Lua", onUi { it.workspace.active.language.display })
+            shot("lua-example")
+            openMenu("Plugins", "Lua Script", "Execute Current File")
+            onUi { activity -> activity.workspace.activate(activity.workspace.docs.first()) }
+            setText("6 * 7")
+            sci(Sci.SCI_SELECTALL)
+            openMenu("Plugins", "Lua Script", "Calculate Selection")
+            waitUntil("the example's command to run") { text() == "6 * 7 = 42" }
 
             // Execute Current File: a script that adds a command and tidies files before they are saved.
             tap("New")
@@ -2854,6 +2870,7 @@ class WalkthroughTest {
             waitUntil("the script to hear of the other tab") { console().endsWith("now at new 1\n") }
             setText("quiet")
             openMenu("Plugins", "Lua Script")
+            onUi { it.revealMenuRow("Shout") }
             assertTrue("the shortcut shows beside the command", onScreen("Ctrl+Alt+U"))
             shot("lua-menu")
             menu("Shout")

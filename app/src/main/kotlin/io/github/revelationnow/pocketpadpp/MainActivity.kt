@@ -3698,6 +3698,14 @@ open class MainActivity : Activity() {
         openUris(listOf(Uri.fromFile(script)))
     }
 
+    private val luaExamples: List<String> by lazy { assets.list("lua/examples")?.filter { it.endsWith(".lua") }?.sorted() ?: emptyList() }
+
+    /** Plugins > Lua Script > Examples: a script that comes with the app, in a tab of its own to read, run or copy from. */
+    private fun openLuaExample(name: String) {
+        val utf8 = assets.open("lua/examples/$name").use { it.readBytes() }
+        workspace.open(null, LoadedFile(name, utf8, TextEncodings.UTF8, Eol.detect(utf8)), workspace.languages.byName("lua"))
+    }
+
     private fun runLuaCommand(name: String) {
         lua?.dispatch("shortcut", name)?.let { luaProblem(it) }
     }
@@ -3835,7 +3843,10 @@ open class MainActivity : Activity() {
             "info" -> return luaInfo(args)
             "command" -> {
                 val asked = args.getOrNull(0)
-                val path = if (asked is Long) nppCommands.path(asked) ?: throw IllegalArgumentException("MenuCommand: Notepad++ has no menu command numbered $asked") else asked as String
+                val path = when (asked) {
+                    is Number -> nppCommands.path(asked.toLong()) ?: throw IllegalArgumentException("MenuCommand: Notepad++ has no menu command numbered ${asked.toLong()}")
+                    else -> asked.toString()
+                }
                 val command = commandFor(path) ?: throw IllegalArgumentException("MenuCommand: Pocketpad++ has no command \"$path\"")
                 return runCommand(command)
             }
@@ -4196,6 +4207,11 @@ open class MainActivity : Activity() {
             item("Restart Lua") {
                 restartLua()
                 toast("Lua was started afresh")
+            }
+            if (!cataloguing) {
+                sub("Examples") {
+                    for (name in luaExamples) item(name.removeSuffix(".lua")) { openLuaExample(name) }
+                }
             }
             // The commands scripts added with npp.AddShortcut.
             for (name in luaCommands.keys) item(name) { runLuaCommand(name) }
@@ -4977,7 +4993,7 @@ open class MainActivity : Activity() {
         const val MAP_WIDTH_DP = 72f
 
         /** The Lua Script menu's own commands, which a script's command may not be named after. */
-        val LUA_MENU = setOf("Show Console", "Execute Current File", "Edit Startup Script", "Restart Lua")
+        val LUA_MENU = setOf("Show Console", "Execute Current File", "Edit Startup Script", "Restart Lua", "Examples")
 
         /** A script's timer does not fire more often than this. */
         const val LUA_TIMER_MIN_MS = 20L
@@ -4986,7 +5002,43 @@ open class MainActivity : Activity() {
          * Notepad++ menu commands whose place or name in this app's menus is not the one in Notepad++'s menu
          * resource, for npp:MenuCommand(IDM_...).
          */
-        val NPP_COMMAND_NAMES: Map<String, String> = mapOf()
+        val NPP_COMMAND_NAMES: Map<String, String> = buildMap {
+            for (n in listOf("1st", "2nd", "3rd", "4th", "5th")) {
+                put("Search > Style All Occurrences of Token > Using $n Style", "Search > Mark All > Using $n Style")
+                put("Search > Style One Token > Using $n Style", "Search > Mark One > Using $n Style")
+                put("Search > Clear Style > Clear $n Style", "Search > Unmark All > Clear $n Style")
+            }
+            put("Search > Clear Style > Clear all Styles", "Search > Unmark All > Clear all Styles")
+            for (name in listOf("Go to Next Change", "Go to Previous Change", "Clear Change History")) {
+                put("Search > Change History > $name", "Search > Changed Lines > $name")
+            }
+            put("Search > Bookmark > Inverse Bookmarks", "Search > Bookmark > Inverse Bookmark")
+            for (n in 1..5) put("View > Tab > Apply Color $n", "View > Tab > Apply Colour $n")
+            put("View > Tab > Remove Color", "View > Tab > Remove Colour")
+            for (browser in listOf("Firefox", "Chrome", "Edge", "IE")) put("View > View Current File in > $browser", "View > View Current File in Browser")
+            put("View > Zoom > Zoom In (Ctrl+Mouse Wheel Up)", "View > Zoom > Zoom In")
+            put("View > Zoom > Zoom Out (Ctrl+Mouse Wheel Down)", "View > Zoom > Zoom Out")
+            // Here an encoding chosen from the menu is the one the text is saved in, which is what converting means.
+            for (encoding in listOf("ANSI", "UTF-8", "UTF-8-BOM", "UTF-16 BE BOM", "UTF-16 LE BOM")) put("Encoding > Convert to $encoding", "Encoding > $encoding")
+            put("Edit > On Selection > Redact Selection \u2588 (Shift: \u25CF)", "Edit > On Selection > Redact Selection")
+            put("Edit > Read-Only in Notepad++ > Read-Only on Current Document", "Edit > Read-Only")
+            put("Edit > Read-Only in Notepad++ > Read-Only for All Documents", "Edit > Set Read-Only for All Documents")
+            put("Edit > Read-Only in Notepad++ > Clear Read-Only for All Documents", "Edit > Clear Read-Only for All Documents")
+            put("File > Move to Recycle Bin", "File > Delete from Storage")
+            for (name in listOf("Define your language...", "Open User Defined Language folder...", "Notepad++ User Defined Languages Collection")) {
+                put("Language > $name", "Language > User Defined Language > $name")
+            }
+            put("Language > INI file", "Language > ini")
+            put("Language > MS-DOS Style", "Language > NFO")
+            put("Language > Microsoft Transact-SQL", "Language > mssql")
+            put("Language > Properties", "Language > Properties file")
+            put("Language > Resource file", "Language > RC")
+            put("Settings > Edit Popup ContextMenu", "Settings > Selection Menu Items...")
+            put("? > About Notepad++", "? > About Pocketpad++...")
+            put("? > Notepad++ Home", "? > Pocketpad++ Home")
+            put("? > Notepad++ Project Page", "? > Pocketpad++ Project Page")
+            put("? > Notepad++ Community (Forum)", "? > Report a Problem")
+        }
 
         /** The largest file HEX view takes: its bytes are all held in memory. */
         const val HEX_MAX_BYTES = 16L * 1024 * 1024

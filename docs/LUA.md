@@ -13,6 +13,7 @@ Everything is under **Plugins > Lua Script**:
 | Execute Current File | Runs the document on screen as a script |
 | Edit Startup Script | Opens `startup.lua`, which runs when the app starts and again each time you save it |
 | Restart Lua | Starts the interpreter afresh: commands, handlers and timers of earlier scripts are gone, then the startup script runs |
+| Examples | Six small scripts that come with the app, each opened in a tab to read, run or copy from: Word Count, Insert Date, Calculate Selection, Trim on Save, Auto Close Brackets, Highlight Selected Word |
 | (your commands) | Whatever scripts added with `npp.AddShortcut` |
 
 ## A first script
@@ -105,8 +106,9 @@ Events a handler can be registered for:
 | `OnMarginClick` | position, margin, modifiers |
 | `OnSavePointReached`, `OnSavePointLeft`, `OnModifyAttemptRO`, `OnZoom` | none |
 
-Scripts can keep modules beside the startup script: `require "name"` looks for `name.lua` in the same folder
-(`npp:GetPluginsConfigDir()` says where that is).
+The startup script lives in the app's own storage; `npp:GetPluginsConfigDir()` says where. Lua's `io` and `os`
+work there, and `require "name"` looks for `name.lua` in that folder. Indicators 9 to 19 are free for scripts
+to mark text with; the app uses the ones above.
 
 ## Limits
 
