@@ -6,6 +6,8 @@ import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
 import io.github.revelationnow.pocketpadpp.core.Invisibles
 import io.github.revelationnow.pocketpadpp.core.LanguageSetup
+import io.github.revelationnow.pocketpadpp.core.MacroStep
+import io.github.revelationnow.pocketpadpp.core.Macros
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.SciApi
@@ -42,6 +44,12 @@ private fun eq(expected: Any?, actual: Any?, what: String) {
 private fun ok(condition: Boolean, what: String) = eq(true, condition, what)
 
 private object QuietHost : SciHost {
+    val recorded = ArrayList<MacroStep>()
+
+    override fun macroRecord(message: Int, wParam: Long, lParam: Long, text: ByteArray?) {
+        recorded += MacroStep(message, wParam, lParam, text)
+    }
+
     override fun invalidate() {}
     override fun notify(code: Int, position: Long, ch: Int, modifiers: Int, modificationType: Int,
                         length: Long, linesAdded: Long, line: Long, margin: Int, updated: Int) {}
@@ -626,6 +634,35 @@ private fun testMoreEditOps() {
     ok(!Searcher.matchesFilters("a.png", "*.txt *.md"), "files outside the patterns are left out")
     ok(Searcher.matchesFilters("anything.bin", "*.*") && Searcher.matchesFilters("Makefile", ""), "*.* or nothing means every file")
     ok(!Searcher.matchesFilters("app.min.js", "*.js !*.min.js") && Searcher.matchesFilters("app.js", "*.js !*.min.js"), "a pattern with ! excludes")
+
+    // Macros
+    sci.text = ""
+    QuietHost.recorded.clear()
+    sci.send(Sci.SCI_STARTRECORD)
+    ScintillaNative.insertText(sci.ptr, "x=")
+    ScintillaNative.insertText(sci.ptr, ";")
+    ScintillaNative.keyDown(sci.ptr, Sci.SCK_RETURN, 0)
+    sci.send(Sci.SCI_STOPRECORD)
+    ScintillaNative.insertText(sci.ptr, "not recorded")
+    sci.send(Sci.SCI_UNDO)
+    val macro = QuietHost.recorded.toList()
+    ok(macro.size >= 2 && macro.any { it.text != null }, "typing and keys are recorded as steps, text included")
+    eq("x=;\n", sci.text, "what was typed while recording")
+    Macros.play(sci, macro)
+    eq("x=;\nx=;\n", sci.text, "playback repeats it")
+    sci.send(Sci.SCI_UNDO)
+    eq("x=;\n", sci.text, "playback is one undo step")
+    Macros.playTimes(sci, Macros.decode(Macros.encode(macro)), 3)
+    eq("x=;\nx=;\nx=;\nx=;\n", sci.text, "a macro survives being stored, and can run several times")
+    sci.text = "a\nb\nc"
+    QuietHost.recorded.clear()
+    sci.send(Sci.SCI_STARTRECORD)
+    ScintillaNative.insertText(sci.ptr, "- ")
+    ScintillaNative.keyDown(sci.ptr, Sci.SCK_DOWN, 0)
+    ScintillaNative.keyDown(sci.ptr, Sci.SCK_HOME, 0)
+    sci.send(Sci.SCI_STOPRECORD)
+    eq(2, Macros.playToEnd(sci, QuietHost.recorded.toList()), "run until the end of file")
+    eq("- a\n- b\n- c", sci.text, "every line got its turn, the last one too")
 
     // Column Editor
     eq(listOf("1", "1", "3", "3", "5"), TextTransforms.columnNumbers(5, 1, 2, 2, 10, TextTransforms.Leading.NONE), "numbers with increase and repeat")

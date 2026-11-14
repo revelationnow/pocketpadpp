@@ -1601,6 +1601,48 @@ class WalkthroughTest {
         shot("find-in-files-opened")
     }
 
+    @Test
+    fun macros() {
+        fun soft(text: String) = onUi { it.editor.onCreateInputConnection(EditorInfo())!!.commitText(text, 1) }
+        setText("a\nb\nc")
+
+        // Record: type a dash, go down a line and to its start.
+        openMenu("Macro", "Start Recording")
+        assertTrue("the status bar shows that recording is on", device.wait(Until.hasObject(By.text(Pattern.compile(".*REC.*"))), 3000) == true)
+        soft("- ")
+        tap("\u2193")
+        tap("Home")
+        openMenu("Macro", "Stop Recording")
+        assertEquals("- a\nb\nc", text())
+        soft("x")
+        sci(Sci.SCI_UNDO)
+
+        openMenu("Macro", "Playback")
+        assertEquals("playback repeats the recording at the caret", "- a\n- b\nc", text())
+        openMenu("Macro", "Run a Macro Multiple Times...")
+        assertTrue(onScreen("Run a Macro Multiple Times"))
+        tap("Run until the end of file")
+        shot("macro-run-multiple")
+        tapButton("Run")
+        assertEquals("run until the end of file finishes the job", "- a\n- b\n- c", text())
+
+        // A saved macro is listed in the menu and kept for the next start.
+        openMenu("Macro", "Save Current Recorded Macro...")
+        device.wait(Until.findObject(By.desc("Macro name")), 4000)!!.text = "Dash"
+        tapButton("OK")
+        setText("x\ny")
+        openMenu("Macro", "Dash")
+        assertEquals("- x\ny", text())
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        device.waitForIdle()
+        tapDescribed("Menu")
+        menu("Macro")
+        assertTrue("the saved macro is still there after a restart", onScreen("Dash"))
+        shot("macro-menu")
+        tapDescribed("Close menu")
+    }
+
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */
     @Test
     fun readmeScreens() {

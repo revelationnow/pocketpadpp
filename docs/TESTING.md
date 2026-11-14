@@ -34,6 +34,7 @@ and saves a screenshot at every step. It covers:
 - change history marks and navigation, rename and delete, saving and loading a session, the Character Panel,
   the clipboard history and the search engine choice
 - Find All in open documents and Find in Files, with the results panel and moving between hits
+- recording a macro, playing it back, running it to the end of the file, saving it
 - highlighting for C++, Python, HTML and JSON
 
 To run it yourself, start an emulator or plug in a phone with USB debugging and run `tools/run_ui_tests.sh`.

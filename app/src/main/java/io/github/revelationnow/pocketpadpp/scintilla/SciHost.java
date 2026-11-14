@@ -10,6 +10,13 @@ public interface SciHost {
     void cancelTimer(int reason);
     void setIdle(boolean on);
     void queueWork();
+
+    /**
+     * A step of a macro being recorded (between SCI_STARTRECORD and SCI_STOPRECORD): a message to send again
+     * on playback. For messages whose last argument is text, {@code text} holds it and {@code lParam} is 0.
+     */
+    default void macroRecord(int message, long wParam, long lParam, byte[] text) {
+    }
     void setClipboard(String text);
     String getClipboard();
 }

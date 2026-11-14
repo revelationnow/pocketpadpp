@@ -45,6 +45,7 @@ struct JniIds {
 	jmethodID hostCancelTimer {};
 	jmethodID hostSetIdle {};
 	jmethodID hostQueueWork {};
+	jmethodID hostMacroRecord {};
 	jmethodID hostSetClipboard {};
 	jmethodID hostGetClipboard {};
 };

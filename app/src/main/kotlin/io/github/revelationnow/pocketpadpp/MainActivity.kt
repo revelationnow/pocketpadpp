@@ -47,6 +47,8 @@ import io.github.revelationnow.pocketpadpp.app.ResultsPanel
 import io.github.revelationnow.pocketpadpp.core.Hit
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
 import io.github.revelationnow.pocketpadpp.core.Searcher
+import io.github.revelationnow.pocketpadpp.core.MacroStep
+import io.github.revelationnow.pocketpadpp.core.Macros
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
@@ -92,6 +94,12 @@ class MainActivity : Activity() {
     private var searchEditor: ScintillaView? = null
     private var searchRun = 0
     private val clipHistory = ArrayDeque<String>()
+
+    // The macro being recorded, or the last one recorded.
+    private val currentMacro = ArrayList<MacroStep>()
+    private var recording = false
+    private var macroPaused = false
+    private var keyboardBeforeRecording: ScintillaView.KeyboardMode? = null
 
     // The on-screen Ctrl, Alt and Shift keys: SCMOD_* bits held for the next key only, and those locked on.
     private var armedModifiers = 0
@@ -149,7 +157,15 @@ class MainActivity : Activity() {
 
         editor.onStateChanged = { onEditorStateChanged() }
         editor.onTextChanged = { workspace.textChanged() }
-        editor.onCharAdded = { ch -> EditOps.autoIndent(editor, ch) }
+        editor.onCharAdded = { ch ->
+            // Auto-indent happens again on playback, so what it does is not part of a macro.
+            macroPaused = true
+            EditOps.autoIndent(editor, ch)
+            macroPaused = false
+        }
+        editor.onMacroStep = { message, wParam, lParam, text ->
+            if (recording && !macroPaused) currentMacro += MacroStep(message, wParam, lParam, text)
+        }
         editor.onZoomChanged = { ThemeApplier.updateLineNumberWidth(editor, showLineNumbers) }
         editor.onShortcut = { key, modifiers -> shortcut(key, modifiers) }
         editor.onCopied = { text ->
@@ -437,6 +453,8 @@ class MainActivity : Activity() {
             }
             ctrl or shift -> when (key) {
                 'S'.code -> saveAll()
+                'R'.code -> if (recording) stopRecording() else startRecording()
+                'P'.code -> if (!recording && currentMacro.isNotEmpty()) Macros.play(editor, currentMacro.toList())
                 'F'.code -> findInFilesDialog()
                 'W'.code -> closeMany(docs.toList())
                 'Q'.code -> EditOps.streamComment(editor, language.commentStart, language.commentEnd)
@@ -467,6 +485,7 @@ class MainActivity : Activity() {
                 'L'.code -> showMainMenu("Language")
                 'T'.code -> showMainMenu("Settings")
                 'O'.code -> showMainMenu("Tools")
+                'M'.code -> showMainMenu("Macro")
                 'W'.code -> showMainMenu("Window")
                 'C'.code -> columnEditor()
                 '0'.code -> editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_CONTRACT.toLong())
@@ -549,6 +568,7 @@ class MainActivity : Activity() {
         if (carets > 1) parts += "$carets carets"
         parts += "${editor.send(Sci.SCI_GETLINECOUNT)} lines"
         if (editor.send(Sci.SCI_GETREADONLY) != 0L) parts += "Read-only"
+        if (recording) parts += "REC"
         statusText.text = parts.joinToString("  ·  ")
         languageChip.text = workspace.active.language.display
         eolChip.text = Eol.fromSciMode(editor.send(Sci.SCI_GETEOLMODE).toInt()).label
@@ -840,6 +860,7 @@ class MainActivity : Activity() {
             sub("Language") { languageMenu() }
             sub("Settings") { settingsMenu() }
             sub("Tools") { toolsMenu() }
+            sub("Macro") { macroMenu() }
             sub("Window") { windowMenu() }
             sub("?") { helpMenu() }
         }
@@ -1681,6 +1702,116 @@ class MainActivity : Activity() {
                     .show()
             }
         }
+    }
+
+    // endregion
+
+    // region Macros
+
+    private fun MenuSpec.macroMenu() {
+        val saved = savedMacros()
+        item("Start Recording", enabled = !recording) { startRecording() }
+        item("Stop Recording", enabled = recording) { stopRecording() }
+        item("Playback", enabled = !recording && currentMacro.isNotEmpty()) { Macros.play(editor, currentMacro.toList()) }
+        item("Save Current Recorded Macro...", enabled = !recording && currentMacro.isNotEmpty()) { saveMacro() }
+        item("Run a Macro Multiple Times...", enabled = !recording && (currentMacro.isNotEmpty() || saved.isNotEmpty())) { runMacroDialog() }
+        for ((name, steps) in saved) item(name, enabled = !recording) { Macros.play(editor, steps) }
+        if (saved.isNotEmpty()) {
+            sub("Delete Macro") {
+                for ((name, _) in saved) item(name) { storeMacros(savedMacros().filter { it.first != name }) }
+            }
+        }
+    }
+
+    private fun startRecording() {
+        currentMacro.clear()
+        recording = true
+        // Typing has to arrive as plain keys to be recorded, which is how the keyboard works with suggestions off.
+        keyboardBeforeRecording = editor.keyboardMode
+        editor.keyboardMode = ScintillaView.KeyboardMode.CODE
+        editor.send(Sci.SCI_STARTRECORD)
+        updateStatus()
+        toast("Recording. Choose Macro > Stop Recording when done.")
+    }
+
+    private fun stopRecording() {
+        editor.send(Sci.SCI_STOPRECORD)
+        recording = false
+        keyboardBeforeRecording?.let { editor.keyboardMode = it }
+        keyboardBeforeRecording = null
+        updateStatus()
+    }
+
+    /** Saved macros as (name, steps), kept in the settings one per line. */
+    private fun savedMacros(): List<Pair<String, List<MacroStep>>> =
+        (prefs.getString("macros", "") ?: "").split('\n').filter { '\t' in it }
+            .map { it.substringBefore('\t') to Macros.decode(it.substringAfter('\t')) }
+
+    private fun storeMacros(macros: List<Pair<String, List<MacroStep>>>) {
+        prefs.edit().putString("macros", macros.joinToString("\n") { "${it.first}\t${Macros.encode(it.second)}" }).apply()
+    }
+
+    private fun saveMacro() {
+        val input = EditText(themed).apply {
+            contentDescription = "Macro name"
+            hint = "Name"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            maxLines = 1
+        }
+        val container = LinearLayout(themed).apply {
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        AlertDialog.Builder(themed)
+            .setTitle("Save Current Recorded Macro")
+            .setView(container)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val name = input.text.toString().trim().replace('\t', ' ').replace('\n', ' ')
+                if (name.isEmpty()) return@setPositiveButton toast("The macro needs a name")
+                storeMacros(savedMacros().filter { it.first != name } + (name to currentMacro.toList()))
+                toast("Macro \"$name\" saved")
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun runMacroDialog() {
+        val choices = ArrayList<Pair<String, List<MacroStep>>>()
+        if (currentMacro.isNotEmpty()) choices += "Current recorded macro" to currentMacro.toList()
+        choices += savedMacros()
+        val which = Spinner(themed).apply {
+            contentDescription = "Macro to run"
+            adapter = ArrayAdapter(themed, android.R.layout.simple_spinner_dropdown_item, choices.map { it.first })
+        }
+        val times = RadioButton(themed).apply { text = "Run this many times:" }
+        val toEnd = RadioButton(themed).apply { text = "Run until the end of file" }
+        val count = EditText(themed).apply {
+            contentDescription = "Times to run"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText("1")
+            minEms = 4
+        }
+        val content = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(which, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(RadioGroup(themed).apply {
+                addView(times)
+                addView(toEnd)
+            })
+            addView(count)
+        }
+        times.isChecked = true
+        AlertDialog.Builder(themed)
+            .setTitle("Run a Macro Multiple Times")
+            .setView(ScrollView(themed).apply { addView(content) })
+            .setPositiveButton("Run") { _, _ ->
+                val steps = choices.getOrNull(which.selectedItemPosition)?.second ?: return@setPositiveButton
+                if (toEnd.isChecked) Macros.playToEnd(editor, steps) else Macros.playTimes(editor, steps, count.text.toString().toIntOrNull() ?: 1)
+                editor.requestFocus()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // endregion

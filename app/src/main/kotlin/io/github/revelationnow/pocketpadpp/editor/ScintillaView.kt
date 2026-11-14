@@ -91,6 +91,13 @@ class ScintillaView @JvmOverloads constructor(
      */
     var onShortcut: ((Int, Int) -> Boolean)? = null
 
+    /** Called with each step while a macro is being recorded (see SCI_STARTRECORD). */
+    var onMacroStep: ((Int, Long, Long, ByteArray?) -> Unit)? = null
+
+    override fun macroRecord(message: Int, wParam: Long, lParam: Long, text: ByteArray?) {
+        onMacroStep?.invoke(message, wParam, lParam, text)
+    }
+
     /** Called with every text this editor puts on the clipboard, for the clipboard history. */
     var onCopied: ((String) -> Unit)? = null
 

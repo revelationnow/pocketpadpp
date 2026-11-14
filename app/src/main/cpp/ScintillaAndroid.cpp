@@ -1,6 +1,7 @@
 // Pocketpad++ - Scintilla platform layer for Android.
 // The editor class: binds one Scintilla instance to a Java SciHost.
 
+#include <cstring>
 #include "SciHeaders.h"
 #include "Lexilla.h"
 #include "Bridge.h"
@@ -540,6 +541,45 @@ void ScintillaAndroid::NotifyChange() {
 void ScintillaAndroid::NotifyParent(NotificationData scn) {
 	JNIEnv *env = Env();
 	if (!env || !host) {
+		return;
+	}
+	if (scn.nmhdr.code == Notification::MacroRecord) {
+		// A step of a macro being recorded: the message with its arguments. Where the last argument is text
+		// it is copied here, because the pointer is only good for the length of this call.
+		const char *text = nullptr;
+		size_t length = 0;
+		switch (scn.message) {
+		case Message::ReplaceSel:
+		case Message::InsertText:
+		case Message::SearchNext:
+		case Message::SearchPrev:
+			text = reinterpret_cast<const char *>(scn.lParam);
+			length = text ? strlen(text) : 0;
+			break;
+		case Message::AddText:
+		case Message::AppendText:
+			text = reinterpret_cast<const char *>(scn.lParam);
+			length = static_cast<size_t>(scn.wParam);
+			break;
+		default:
+			break;
+		}
+		jbyteArray bytes = nullptr;
+		if (text) {
+			bytes = env->NewByteArray(static_cast<jsize>(length));
+			if (bytes && length > 0) {
+				env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(length), reinterpret_cast<const jbyte *>(text));
+			}
+		}
+		env->CallVoidMethod(host, g_ids.hostMacroRecord,
+			static_cast<jint>(scn.message),
+			static_cast<jlong>(scn.wParam),
+			static_cast<jlong>(text ? 0 : scn.lParam),
+			bytes);
+		if (bytes) {
+			env->DeleteLocalRef(bytes);
+		}
+		ClearException(env);
 		return;
 	}
 	env->CallVoidMethod(host, g_ids.hostNotify,

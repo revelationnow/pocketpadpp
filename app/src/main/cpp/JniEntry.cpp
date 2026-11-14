@@ -289,6 +289,7 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
 	g_ids.hostCancelTimer = Method(env, host, "cancelTimer", "(I)V", ok);
 	g_ids.hostSetIdle = Method(env, host, "setIdle", "(Z)V", ok);
 	g_ids.hostQueueWork = Method(env, host, "queueWork", "()V", ok);
+	g_ids.hostMacroRecord = Method(env, host, "macroRecord", "(IJJ[B)V", ok);
 	g_ids.hostSetClipboard = Method(env, host, "setClipboard", "(Ljava/lang/String;)V", ok);
 	g_ids.hostGetClipboard = Method(env, host, "getClipboard", "()Ljava/lang/String;", ok);
 
