@@ -19,6 +19,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import io.github.revelationnow.pocketpadpp.core.Marks
+import io.github.revelationnow.pocketpadpp.core.SearchOptions
 import io.github.revelationnow.pocketpadpp.editor.ScintillaView
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import org.junit.After
@@ -1550,6 +1551,54 @@ class WalkthroughTest {
         assertTrue("the labels take their own room in the line ($plainWidth -> $labelledWidth)", labelledWidth > plainWidth * 2)
         shot("non-printing-characters")
         assertTrue(context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("showNpc", false))
+    }
+
+    @Test
+    fun findAllAndFindInFiles() {
+        fun active() = onUi { it.workspace.active.name }
+        fun heading(pattern: String) = device.wait(Until.hasObject(By.text(Pattern.compile(pattern))), 6000) == true
+        val files = listOf(
+            "a.txt" to "alpha\nbeta alpha\n",
+            "b.md" to "gamma\nALPHA\n",
+            "c.bin" to "alpha\u0000binary\n",
+        ).map { (name, content) -> File(context.cacheDir, name).apply { writeText(content) } }
+        for (file in files.take(2)) {
+            onUi { it.openUris(listOf(Uri.fromFile(file))) }
+            waitUntil("${file.name} to open") { active() == file.name }
+        }
+
+        // Find All in All Opened Documents lists every hit; a tap goes there.
+        tap("Find")
+        device.findObjects(By.clazz("android.widget.EditText"))[0].text = "alpha"
+        openMenu("Search", "Find All in All Opened Documents")
+        assertTrue("the heading sums up the search", heading("Search \"alpha\" \\(3 hits in 2 of 2 documents\\)"))
+        assertTrue(onScreen("a.txt (2 hits)"))
+        shot("find-all-results")
+        tap("Line 2: beta alpha")
+        waitUntil("the hit to be shown") { active() == "a.txt" && selection() == "11-16" }
+        openMenu("Search", "Next Search Result")
+        waitUntil("the next hit, in the other document") { active() == "b.md" && selection() == "6-11" }
+        openMenu("Search", "Previous Search Result")
+        waitUntil("back to the hit before") { active() == "a.txt" && selection() == "11-16" }
+
+        // The switches of the Find bar apply.
+        tapDescribed("Match case")
+        openMenu("Search", "Find All in Current Document")
+        assertTrue(heading("Search \"alpha\" \\(2 hits in 1 of 1 document\\)"))
+        tapDescribed("Match case")
+        tapDescribed("Close")
+        tapDescribed("Close search results")
+        assertTrue("the panel closes", gone("a.txt (2 hits)"))
+
+        // Find in Files reads files from storage, passes over what is not text, and opens a file for a hit.
+        openMenu("File", "Close All")
+        waitUntil("everything to close") { onUi { it.workspace.docs.size } == 1 && active() == "new 1" }
+        onUi { activity -> activity.findInFiles(files.map { Uri.fromFile(it) to it.name }, "alpha", SearchOptions()) }
+        assertTrue("all three files were looked at, two had hits", heading("Search \"alpha\" \\(3 hits in 2 of 3 files\\)"))
+        shot("find-in-files-results")
+        tap("Line 2: ALPHA")
+        waitUntil("the file to open at the hit") { active() == "b.md" && selection() == "6-11" }
+        shot("find-in-files-opened")
     }
 
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */

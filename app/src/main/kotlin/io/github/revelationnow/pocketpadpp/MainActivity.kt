@@ -43,6 +43,10 @@ import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
 import io.github.revelationnow.pocketpadpp.core.Invisibles
 import io.github.revelationnow.pocketpadpp.core.SessionStore
+import io.github.revelationnow.pocketpadpp.app.ResultsPanel
+import io.github.revelationnow.pocketpadpp.core.Hit
+import io.github.revelationnow.pocketpadpp.core.SearchOptions
+import io.github.revelationnow.pocketpadpp.core.Searcher
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
@@ -81,6 +85,12 @@ class MainActivity : Activity() {
     private lateinit var palette: Palette
     private lateinit var themed: Context
     private val chromeBars = ArrayList<View>()
+    private lateinit var results: ResultsPanel
+
+    // A second editor that is never shown: it runs searches over other documents and over files on disk
+    // with exactly the rules the Find bar has, without disturbing what is on screen.
+    private var searchEditor: ScintillaView? = null
+    private var searchRun = 0
     private val clipHistory = ArrayDeque<String>()
 
     // The on-screen Ctrl, Alt and Shift keys: SCMOD_* bits held for the next key only, and those locked on.
@@ -205,6 +215,14 @@ class MainActivity : Activity() {
 
         root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
+        results = ResultsPanel(themed, palette)
+        results.onOpen = { group, hit -> goToHit(group, hit) }
+        results.onClose = {
+            searchRun++
+            editor.requestFocus()
+        }
+        root.addView(results, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.3f).toInt()))
+
         imeLogView = TextView(themed).apply {
             typeface = Typeface.MONOSPACE
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
@@ -257,6 +275,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         destroyed = true
         io.shutdown()
+        searchEditor?.destroy()
         editor.destroy()
         super.onDestroy()
     }
@@ -266,6 +285,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             findBar.isOpen -> findBar.close()
+            results.isOpen -> results.close()
             fullScreen -> setScreenMode(full = false, bare = false)
             else -> super.onBackPressed()
         }
@@ -383,9 +403,12 @@ class MainActivity : Activity() {
             0 -> when (key) {
                 f(2) -> goToBookmark(forward = true)
                 f(3) -> findBar.find(forward = true)
+                f(4) -> results.step(forward = true)
+                f(7) -> if (results.isOpen) results.close() else results.show()
                 else -> return false
             }
             shift -> when (key) {
+                f(4) -> results.step(forward = false)
                 f(2) -> goToBookmark(forward = false)
                 f(3) -> findBar.find(forward = false)
                 else -> return false
@@ -414,6 +437,7 @@ class MainActivity : Activity() {
             }
             ctrl or shift -> when (key) {
                 'S'.code -> saveAll()
+                'F'.code -> findInFilesDialog()
                 'W'.code -> closeMany(docs.toList())
                 'Q'.code -> EditOps.streamComment(editor, language.commentStart, language.commentEnd)
                 'K'.code -> EditOps.setLineComment(editor, language.commentLine, comment = false)
@@ -566,11 +590,12 @@ class MainActivity : Activity() {
         }
     }
 
-    internal fun openUris(uris: List<Uri>) {
+    internal fun openUris(uris: List<Uri>, then: (() -> Unit)? = null) {
         for (uri in uris) {
             val existing = workspace.findByUri(uri)
             if (existing != null) {
                 workspace.activate(existing)
+                then?.invoke()
                 continue
             }
             FileIo.persistAccess(this, uri)
@@ -578,8 +603,10 @@ class MainActivity : Activity() {
                 val result = runCatching { FileIo.read(this, uri) }
                 ui.post {
                     if (destroyed) return@post
-                    result.onSuccess { workspace.open(uri, it) }
-                        .onFailure { toast("Cannot open the file: ${it.message ?: it.javaClass.simpleName}") }
+                    result.onSuccess {
+                        workspace.open(uri, it)
+                        then?.invoke()
+                    }.onFailure { toast("Cannot open the file: ${it.message ?: it.javaClass.simpleName}") }
                 }
             }
         }
@@ -692,6 +719,17 @@ class MainActivity : Activity() {
                     val ok = runCatching { FileIo.write(this, uri, xml.toByteArray(Charsets.UTF_8)) }.isSuccess
                     ui.post { if (!destroyed) toast(if (ok) "Session saved" else "Cannot write the session file") }
                 }
+            }
+
+            REQUEST_FIND_FOLDER -> data.data?.let { tree ->
+                try {
+                    contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e: Exception) {
+                    // The folder stays usable until the app is closed.
+                }
+                prefs.edit().putString("findFolder", tree.toString()).apply()
+                findFolderThen?.invoke()
+                findFolderThen = null
             }
 
             REQUEST_HASH -> {
@@ -1011,6 +1049,12 @@ class MainActivity : Activity() {
         item("Find (Volatile) Next") { findBar.findSelection(forward = true, remember = false) }
         item("Find (Volatile) Previous") { findBar.findSelection(forward = false, remember = false) }
         item("Replace...") { findBar.open(withReplace = true) }
+        item("Find All in Current Document") { findAllInDocuments(all = false) }
+        item("Find All in All Opened Documents") { findAllInDocuments(all = true) }
+        item("Find in Files...") { findInFilesDialog() }
+        item("Search Results Window", checked = results.isOpen) { if (results.isOpen) results.close() else results.show() }
+        item("Next Search Result") { if (!results.step(forward = true)) toast("There are no search results") }
+        item("Previous Search Result") { if (!results.step(forward = false)) toast("There are no search results") }
         item("Incremental Search") { findBar.openIncremental() }
         item("Mark...") { findBar.openMark() }
         item("Go to...") { goToLine() }
@@ -1641,6 +1685,213 @@ class MainActivity : Activity() {
 
     // endregion
 
+    // region Find All and Find in Files
+
+    private fun searcher(): ScintillaView = searchEditor ?: ScintillaView(this).also { searchEditor = it }
+
+    private fun hitsLabel(hits: Int) = if (hits == 1) "1 hit" else "$hits hits"
+
+    /** The results need the room the keyboard takes, and reading them needs no keyboard. */
+    private fun hideKeyboard() {
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+            .hideSoftInputFromWindow(editor.windowToken, 0)
+    }
+
+    /** Find All in Current Document / in All Opened Documents, with the Find bar's text and switches. */
+    private fun findAllInDocuments(all: Boolean) {
+        val text = findBar.searchText
+        if (text.isEmpty()) {
+            findBar.open(withReplace = false)
+            return toast("Type what to find first")
+        }
+        val options = findBar.searchOptions
+        val docs = if (all) workspace.docs.toList() else listOf(workspace.active)
+        val engine = searcher()
+        searchRun++
+        hideKeyboard()
+        results.begin("Search \"$text\"")
+        var hits = 0
+        var withHits = 0
+        for (doc in docs) {
+            // A Scintilla document can be attached to a second view, which leaves the one on screen alone.
+            engine.send(Sci.SCI_SETDOCPOINTER, 0, doc.sciDoc)
+            val found = Searcher.findAll(engine, text, options)
+            if (found.isNotEmpty()) {
+                results.add(ResultsPanel.Group(doc, doc.name, found))
+                hits += found.size
+                withHits++
+            }
+        }
+        engine.send(Sci.SCI_SETDOCPOINTER, 0, 0)
+        results.setHeading("Search \"$text\" (${hitsLabel(hits)} in $withHits of ${docs.size} ${if (docs.size == 1) "document" else "documents"})")
+    }
+
+    private fun goToHit(group: ResultsPanel.Group, hit: Hit) {
+        fun select() {
+            editor.send(Sci.SCI_ENSUREVISIBLEENFORCEPOLICY, hit.line)
+            val length = editor.send(Sci.SCI_GETLENGTH)
+            editor.send(Sci.SCI_SETSEL, hit.start.coerceAtMost(length), hit.end.coerceAtMost(length))
+            editor.requestFocus()
+        }
+        when (val key = group.key) {
+            is Doc -> if (key in workspace.docs) {
+                workspace.activate(key)
+                select()
+            } else {
+                toast("${group.name} has been closed")
+            }
+            is Uri -> openUris(listOf(key)) { select() }
+        }
+    }
+
+    private var findFolderThen: (() -> Unit)? = null
+
+    private fun chooseFindFolder(then: () -> Unit) {
+        findFolderThen = then
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQUEST_FIND_FOLDER)
+        } catch (e: Exception) {
+            toast("No folder picker is available on this device")
+        }
+    }
+
+    /** Search > Find in Files: what to find, which files, and in which folder. */
+    private fun findInFilesDialog(keepText: String? = null) {
+        val folder = prefs.getString("findFolder", null)?.let { Uri.parse(it) }
+        if (folder == null) return chooseFindFolder { findInFilesDialog(keepText) }
+        fun field(name: String, value: String) = EditText(themed).apply {
+            contentDescription = name
+            hint = name
+            maxLines = 1
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(value)
+        }
+        fun check(label: String, on: Boolean) = android.widget.CheckBox(themed).apply {
+            text = label
+            isChecked = on
+        }
+        val selection = EditOps.selectionOrWord(editor).takeIf { '\n' !in it && it.length <= 200 } ?: ""
+        val what = field("Find what", keepText ?: findBar.searchText.ifEmpty { selection })
+        val filters = field("Filters", prefs.getString("findFilters", "*.*") ?: "*.*")
+        val folderName = TextView(themed).apply {
+            text = "Folder: ${android.provider.DocumentsContract.getTreeDocumentId(folder).substringAfterLast(':').ifEmpty { "storage" }}"
+            setPadding(0, dp(10f), 0, dp(4f))
+        }
+        val matchCase = check("Match case", findBar.matchCaseOn)
+        val wholeWord = check("Match whole word only", findBar.wholeWordOn)
+        val regex = check("Regular expression", false)
+        val subFolders = check("In all sub-folders", true)
+        val content = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            for (view in listOf(what, filters, folderName, matchCase, wholeWord, regex, subFolders)) {
+                addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+        }
+        AlertDialog.Builder(themed)
+            .setTitle("Find in Files")
+            .setView(ScrollView(themed).apply { addView(content) })
+            .setPositiveButton("Find All") { _, _ ->
+                val text = what.text.toString()
+                if (text.isEmpty()) return@setPositiveButton toast("Type what to find first")
+                prefs.edit().putString("findFilters", filters.text.toString()).apply()
+                val options = SearchOptions(matchCase.isChecked, wholeWord.isChecked, regex.isChecked, wrapAround = false)
+                val pattern = filters.text.toString()
+                val deep = subFolders.isChecked
+                results.begin("Listing files...")
+                val run = ++searchRun
+                io.execute {
+                    val files = runCatching { listTree(folder, deep, pattern, run) }.getOrElse { emptyList() }
+                    ui.post { if (!destroyed && run == searchRun) findInFiles(files, text, options) }
+                }
+            }
+            .setNeutralButton("Change folder...") { _, _ ->
+                val typed = what.text.toString()
+                chooseFindFolder { findInFilesDialog(typed) }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** The files under a folder picked with the system's folder picker, as (address, name) pairs. Runs off the main thread. */
+    private fun listTree(tree: Uri, deep: Boolean, filters: String, run: Int): List<Pair<Uri, String>> {
+        val contract = android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID
+        val found = ArrayList<Pair<Uri, String>>()
+        val pending = ArrayDeque<String>()
+        pending += android.provider.DocumentsContract.getTreeDocumentId(tree)
+        while (pending.isNotEmpty() && found.size < MAX_FIND_FILES && run == searchRun) {
+            val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, pending.removeFirst())
+            val columns = arrayOf(contract, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE, android.provider.DocumentsContract.Document.COLUMN_SIZE)
+            contentResolver.query(children, columns, null, null, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getString(0)
+                    val name = cursor.getString(1) ?: continue
+                    if (cursor.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
+                        if (deep) pending += id
+                    } else if (cursor.getLong(3) <= MAX_FIND_FILE_BYTES && Searcher.matchesFilters(name, filters)) {
+                        found += android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id) to name
+                    }
+                }
+            }
+        }
+        return found
+    }
+
+    /**
+     * Searches files one after another: each is read in the background and searched in the unseen editor,
+     * and the panel fills as they come in. Closing the panel or starting another search stops it.
+     */
+    internal fun findInFiles(files: List<Pair<Uri, String>>, text: String, options: SearchOptions) {
+        val run = ++searchRun
+        val engine = searcher()
+        hideKeyboard()
+        results.begin("Search \"$text\" (0 of ${files.size} files)")
+        var hits = 0
+        var withHits = 0
+        io.execute {
+            for ((index, file) in files.withIndex()) {
+                if (run != searchRun || destroyed) return@execute
+                val (uri, name) = file
+                // Files that cannot be read, are too big or are not text are passed over.
+                val loaded = runCatching { FileIo.read(this, uri) }.getOrNull()
+                val utf8 = loaded?.utf8?.takeIf { bytes -> bytes.size <= MAX_FIND_FILE_BYTES && (0 until minOf(bytes.size, 4096)).none { bytes[it].toInt() == 0 } }
+                val done = java.util.concurrent.CountDownLatch(1)
+                ui.post {
+                    try {
+                        if (run == searchRun && !destroyed) {
+                            if (utf8 != null) {
+                                engine.send(Sci.SCI_SETUNDOCOLLECTION, 0)
+                                engine.send(Sci.SCI_CLEARALL)
+                                engine.sendBytes(Sci.SCI_ADDTEXT, utf8.size.toLong(), utf8)
+                                val found = Searcher.findAll(engine, text, options)
+                                if (found.isNotEmpty()) {
+                                    results.add(ResultsPanel.Group(uri, name, found))
+                                    hits += found.size
+                                    withHits++
+                                }
+                            }
+                            val state = if (index == files.size - 1) "${files.size} ${if (files.size == 1) "file" else "files"}" else "${index + 1} of ${files.size} files so far"
+                            results.setHeading("Search \"$text\" (${hitsLabel(hits)} in $withHits of $state)")
+                        }
+                    } finally {
+                        done.countDown()
+                    }
+                }
+                done.await()
+            }
+            ui.post {
+                if (run == searchRun && !destroyed) {
+                    engine.send(Sci.SCI_CLEARALL)
+                    if (files.isEmpty()) results.setHeading("Search \"$text\" (no files to search)")
+                }
+            }
+        }
+    }
+
+    // endregion
+
     /** Edit > Character Panel: the 256 single-byte characters with their codes; a tap inserts one. */
     private fun characterPanel() = showMenu("Character Panel") {
         val names = listOf(
@@ -1915,6 +2166,9 @@ class MainActivity : Activity() {
         const val REQUEST_HASH = 3
         const val REQUEST_LOAD_SESSION = 4
         const val REQUEST_SAVE_SESSION = 5
+        const val REQUEST_FIND_FOLDER = 6
+        const val MAX_FIND_FILES = 5000
+        const val MAX_FIND_FILE_BYTES = 8L * 1024 * 1024
 
         /** Edit > On Selection > Change Search Engine: an empty address means the device's own web search. */
         val SEARCH_ENGINES = listOf(

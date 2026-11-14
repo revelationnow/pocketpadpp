@@ -127,6 +127,10 @@ class FindBar(context: Context, private val editor: SciApi, private val palette:
     val isOpen: Boolean get() = visibility == View.VISIBLE
 
     /** The Match case and whole word switches, which Search > Mark All also goes by, as in Notepad++. */
+    /** What Find All works with: the text in the find field and the switches as they are set. */
+    val searchText: String get() = findField.text.toString()
+    val searchOptions: SearchOptions get() = options()
+
     val matchCaseOn: Boolean get() = matchCase.isChecked
     val wholeWordOn: Boolean get() = wholeWord.isChecked
 

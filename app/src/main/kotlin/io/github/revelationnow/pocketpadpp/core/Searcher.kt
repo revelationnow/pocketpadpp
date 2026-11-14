@@ -14,6 +14,12 @@ data class SearchOptions(
             (if (regex) Sci.SCFIND_REGEXP or Sci.SCFIND_CXX11REGEX else 0)
 }
 
+/**
+ * One match as listed by Find All: its line, its byte range in the document, the text of the line (cut off
+ * if very long) and where in that text the match sits, counted in characters.
+ */
+data class Hit(val line: Long, val start: Long, val end: Long, val text: String, val column: Int, val length: Int)
+
 data class FindResult(val found: Boolean, val wrapped: Boolean = false, val start: Long = -1, val end: Long = -1)
 
 /** Find and replace on top of Scintilla's target search. */
@@ -143,6 +149,39 @@ object Searcher {
             position = if (end > start) end else sci.send(Sci.SCI_POSITIONAFTER, end).also { if (it == end) return count }
         }
         return count
+    }
+
+    /** Find All: every match in the document with its line, up to [limit] of them. */
+    fun findAll(sci: SciApi, text: String, options: SearchOptions, limit: Int = 5000): List<Hit> {
+        val hits = ArrayList<Hit>()
+        forEachMatch(sci, text, options) { start, end ->
+            if (hits.size < limit) {
+                val line = sci.send(Sci.SCI_LINEFROMPOSITION, start)
+                val lineStart = sci.send(Sci.SCI_POSITIONFROMLINE, line)
+                val lineEnd = minOf(sci.send(Sci.SCI_GETLINEENDPOSITION, line), lineStart + 400)
+                val before = String(sci.range(lineStart, minOf(start, lineEnd)), Charsets.UTF_8)
+                val matched = String(sci.range(minOf(start, lineEnd), minOf(end, lineEnd)), Charsets.UTF_8)
+                val after = String(sci.range(minOf(end, lineEnd), lineEnd), Charsets.UTF_8)
+                hits += Hit(line, start, end, before + matched + after, before.length, matched.length)
+            }
+        }
+        return hits
+    }
+
+    /**
+     * Find in Files' Filters field: file name patterns separated by spaces or semicolons, where * stands for
+     * any run of characters and ? for one, and a leading ! excludes. Nothing or *.* lets every file through.
+     */
+    fun matchesFilters(name: String, filters: String): Boolean {
+        fun pattern(glob: String) = Regex(
+            glob.map { if (it == '*') ".*" else if (it == '?') "." else Regex.escape(it.toString()) }.joinToString(""),
+            RegexOption.IGNORE_CASE,
+        )
+        val tokens = filters.split(' ', ';', ',').filter { it.isNotBlank() }
+        val excluded = tokens.filter { it.startsWith("!") }.map { pattern(it.drop(1)) }
+        val included = tokens.filter { !it.startsWith("!") && it != "*.*" && it != "*" }.map { pattern(it) }
+        if (excluded.any { it.matches(name) }) return false
+        return included.isEmpty() || included.any { it.matches(name) }
     }
 
     private const val MAX_MATCHES = 10_000_000

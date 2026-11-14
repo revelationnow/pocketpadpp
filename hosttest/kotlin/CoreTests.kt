@@ -614,6 +614,19 @@ private fun testMoreEditOps() {
     Invisibles.apply(sci, nonPrinting = true, control = false)
     Invisibles.apply(sci, nonPrinting = false, control = true)
 
+    // Find All and the Find in Files filters
+    sci.text = "alpha\nb\u00e9ta alpha\nALPHA\n"
+    val all = Searcher.findAll(sci, "alpha", SearchOptions())
+    eq(listOf(0L, 1L, 2L), all.map { it.line }, "find all lists every match with its line")
+    eq(Triple("b\u00e9ta alpha", 5, 5), Triple(all[1].text, all[1].column, all[1].length), "with the line's text and where the match is in it, in characters")
+    eq(12L to 17L, all[1].start to all[1].end, "and its place in the document, in bytes")
+    eq(2, Searcher.findAll(sci, "alpha", SearchOptions(matchCase = true)).size, "find all goes by the search options")
+    eq(1, Searcher.findAll(sci, "alpha", SearchOptions(), limit = 1).size, "and stops listing at the limit")
+    ok(Searcher.matchesFilters("notes.TXT", "*.txt *.md") && Searcher.matchesFilters("a.md", "*.txt;*.md"), "filters match by pattern, whatever the case")
+    ok(!Searcher.matchesFilters("a.png", "*.txt *.md"), "files outside the patterns are left out")
+    ok(Searcher.matchesFilters("anything.bin", "*.*") && Searcher.matchesFilters("Makefile", ""), "*.* or nothing means every file")
+    ok(!Searcher.matchesFilters("app.min.js", "*.js !*.min.js") && Searcher.matchesFilters("app.js", "*.js !*.min.js"), "a pattern with ! excludes")
+
     // Column Editor
     eq(listOf("1", "1", "3", "3", "5"), TextTransforms.columnNumbers(5, 1, 2, 2, 10, TextTransforms.Leading.NONE), "numbers with increase and repeat")
     eq(listOf("08", "09", "10"), TextTransforms.columnNumbers(3, 8, 1, 1, 10, TextTransforms.Leading.ZEROS), "leading zeros to the widest number")
