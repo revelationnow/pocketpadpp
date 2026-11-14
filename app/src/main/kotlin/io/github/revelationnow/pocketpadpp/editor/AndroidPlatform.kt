@@ -169,11 +169,24 @@ internal class AndroidSurface private constructor(var canvas: Canvas?, private v
         fill.shader = null
     }
 
+    /**
+     * True while the view draws itself mirrored, for right-to-left text direction. Everything is then laid out
+     * from the right, and each piece of text is turned back around its own middle so that it can be read.
+     */
+    var mirrored = false
+
     override fun text(font: SciFont, x: Float, yBase: Float, text: String, argb: Int) {
         val c = canvas ?: return
         val paint = (font as AndroidFont).paint
         paint.color = argb
-        c.drawText(text, x, yBase, paint)
+        if (mirrored) {
+            c.save()
+            c.scale(-1f, 1f, x + paint.measureText(text) / 2f, 0f)
+            c.drawText(text, x, yBase, paint)
+            c.restore()
+        } else {
+            c.drawText(text, x, yBase, paint)
+        }
     }
 
     override fun pushClip(l: Float, t: Float, r: Float, b: Float) {

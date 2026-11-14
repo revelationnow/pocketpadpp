@@ -2371,6 +2371,61 @@ class WalkthroughTest {
         onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
     }
 
+    @Test
+    fun textDirection() {
+        // Where the dark pixels of the first lines are on average, as a fraction of the editor's width.
+        fun inkCentre(): Double {
+            device.waitForIdle()
+            SystemClock.sleep(300)
+            val bitmap = instrumentation.uiAutomation.takeScreenshot()!!.copy(Bitmap.Config.ARGB_8888, false)
+            val bounds = editorBounds()
+            val bottom = minOf(bounds.top + 3 * sci(Sci.SCI_TEXTHEIGHT).toInt(), bitmap.height)
+            var sum = 0.0
+            var count = 0
+            for (y in bounds.top until bottom) {
+                for (x in bounds.left until minOf(bounds.right, bitmap.width)) {
+                    val pixel = bitmap.getPixel(x, y)
+                    val light = 0.299 * ((pixel shr 16) and 0xFF) + 0.587 * ((pixel shr 8) and 0xFF) + 0.114 * (pixel and 0xFF)
+                    if (light < 90) {
+                        sum += x - bounds.left
+                        count++
+                    }
+                }
+            }
+            return if (count == 0) -1.0 else sum / count / bounds.width()
+        }
+        val first = "\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD\n"
+        setText(first + "hello world\n")
+        val leftToRight = inkCentre()
+        assertTrue("written from the left, the text is at the left: $leftToRight", leftToRight in 0.0..0.45)
+
+        openMenu("View", "Text Direction RTL")
+        tapDescribed("Close menu")
+        assertTrue(onUi { it.editor.rightToLeft })
+        val rightToLeft = inkCentre()
+        assertTrue("written from the right, it is at the right: $rightToLeft", rightToLeft > 0.55)
+        shot("text-direction-rtl")
+
+        // A touch still lands on the character under the finger.
+        val target = first.toByteArray().size + 6L
+        val bounds = editorBounds()
+        val x = bounds.right - (sci(Sci.SCI_POINTXFROMPOSITION, 0, target) + 4)
+        val y = bounds.top + sci(Sci.SCI_POINTYFROMPOSITION, 0, target) + sci(Sci.SCI_TEXTHEIGHT) / 2
+        tapAt(x.toFloat(), y.toFloat())
+        waitUntil("the caret to go where the mirrored text was touched") { sci(Sci.SCI_GETCURRENTPOS) in (target - 1)..(target + 1) }
+
+        // The direction is remembered, and goes back with the other command.
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        device.waitForIdle()
+        assertTrue("right to left after a restart", onUi { it.editor.rightToLeft })
+        openMenu("View", "Text Direction LTR")
+        tapDescribed("Close menu")
+        assertTrue(!onUi { it.editor.rightToLeft })
+        assertTrue("back at the left", inkCentre() in 0.0..0.45)
+        onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
+    }
+
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */
     @Test
     fun readmeScreens() {

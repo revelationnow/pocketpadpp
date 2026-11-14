@@ -96,6 +96,7 @@ IDM_VIEW_PROJECT_PANEL_1 IDM_VIEW_PROJECT_PANEL_2 IDM_VIEW_PROJECT_PANEL_3
 IDM_LANG_USER_DLG IDM_LANG_OPENUDLDIR IDM_LANG_UDLCOLLECTION_PROJECT_SITE IDM_LANG_USER
 IDM_VIEW_GOTO_ANOTHER_VIEW IDM_VIEW_CLONE_TO_ANOTHER_VIEW IDM_VIEW_SWITCHTO_OTHER_VIEW IDM_VIEW_SYNSCROLLV
 IDM_VIEW_SYNSCROLLH IDM_VIEW_ZOOM_SYNC IDM_VIEW_GOTO_NEW_INSTANCE IDM_VIEW_LOAD_IN_NEW_INSTANCE
+IDM_EDIT_RTL IDM_EDIT_LTR
 """.split()) | {f"IDM_VIEW_{kind}_{level}" for kind in ("FOLD", "UNFOLD") for level in range(1, 9)} | {
     name.format(n) for n in range(1, 6) for name in (
         "IDM_SEARCH_MARKALLEXT{}", "IDM_SEARCH_MARKONEEXT{}", "IDM_SEARCH_UNMARKALLEXT{}",
@@ -221,6 +222,7 @@ DONE_NOTES = {
     "IDM_EDIT_OPENSELECTEDFILEFOLDERINEXPLORER": "For paths on the device's own storage",
     "IDM_FILE_CONTAININGFOLDERASWORKSPACE": "The folder picker opens at the file; Android wants the folder confirmed",
     "IDM_VIEW_MONITORING": "Checked every two seconds, for the tab on screen",
+    "IDM_EDIT_RTL": "The view is mirrored, as in Notepad++; meant for right-to-left scripts, left-to-right text is laid out in pieces",
     "IDM_VIEW_PROJECT_PANEL_1": "Files are added from open tabs or the file picker",
     "IDM_VIEW_PROJECT_PANEL_2": "Files are added from open tabs or the file picker",
     "IDM_VIEW_PROJECT_PANEL_3": "Files are added from open tabs or the file picker",

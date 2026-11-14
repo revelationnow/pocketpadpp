@@ -222,6 +222,7 @@ open class MainActivity : Activity() {
         options.apply(editor, resources.displayMetrics.density)
         applySelectionMenu()
         if (prefs.getBoolean("documentMap", false)) setDocumentMap(true)
+        editor.rightToLeft = prefs.getBoolean("rightToLeft", false)
 
         editor.onStateChanged = { onEditorStateChanged() }
         editor.onTextChanged = { workspace.textChanged() }
@@ -1538,6 +1539,8 @@ open class MainActivity : Activity() {
             item("Open in New Instance", enabled = stored) { openInNewWindow(move = false) }
         }
         item("Focus on Another View", enabled = otherDoc != null) { swapViews() }
+        item("Text Direction RTL", checked = editor.rightToLeft) { setTextDirection(rightToLeft = true) }
+        item("Text Direction LTR", checked = !editor.rightToLeft) { setTextDirection(rightToLeft = false) }
         item("Synchronize Vertical Scrolling", checked = syncVertical) {
             syncVertical = !syncVertical
             prefs.edit().putBoolean("syncVertical", syncVertical).apply()
@@ -3307,6 +3310,13 @@ open class MainActivity : Activity() {
     private val mainScroll = longArrayOf(0, 0)
     private val otherScroll = longArrayOf(0, 0)
 
+    /** View > Text Direction: lays the text out from the right, for languages written that way, or from the left. */
+    internal fun setTextDirection(rightToLeft: Boolean) {
+        prefs.edit().putBoolean("rightToLeft", rightToLeft).apply()
+        editor.rightToLeft = rightToLeft
+        otherView?.rightToLeft = rightToLeft
+    }
+
     /** Side by side on a wide screen, one above the other on a tall one. */
     private fun layoutSplit() {
         val wide = resources.displayMetrics.widthPixels > resources.displayMetrics.heightPixels
@@ -3392,6 +3402,7 @@ open class MainActivity : Activity() {
         )
         options.apply(view, resources.displayMetrics.density)
         view.send(Sci.SCI_SETWRAPMODE, editor.send(Sci.SCI_GETWRAPMODE))
+        view.rightToLeft = editor.rightToLeft
         zoomOtherView()
     }
 

@@ -81,6 +81,18 @@ class ScintillaView @JvmOverloads constructor(
      */
     var viewOnly = false
 
+    /**
+     * Notepad++'s Text Direction RTL. As there, the whole view is mirrored: lines start at the right edge, the
+     * margins move to the right, and touches are read the same way round. Pieces of text are drawn the right
+     * way up within their place, where Android orders right-to-left scripts itself.
+     */
+    var rightToLeft = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+    private val mirror = android.graphics.Matrix()
+
     /** Called after the caret, selection, text or scroll position changed. Safe to query the editor from here. */
     var onStateChanged: (() -> Unit)? = null
 
@@ -358,14 +370,20 @@ class ScintillaView @JvmOverloads constructor(
             fracY = fracY.coerceIn(0, lineHeight)
         }
         canvas.save()
+        if (rightToLeft) canvas.scale(-1f, 1f, width / 2f, 0f)
+        canvas.save()
         canvas.translate(0f, -fracY.toFloat())
         surface.canvas = canvas
+        surface.mirrored = rightToLeft
         ScintillaNative.paint(ptr, surface)
         surface.canvas = null
         canvas.restore()
-        if (displayOnly) return
-        drawHandles(canvas)
-        drawScrollBar(canvas)
+        if (!displayOnly) {
+            // Handles and the scroll thumb are placed by the same coordinates as the text, so they are mirrored with it.
+            drawHandles(canvas)
+            drawScrollBar(canvas)
+        }
+        canvas.restore()
     }
 
     private fun totalDisplayLines(): Long = send(Sci.SCI_VISIBLEFROMDOCLINE, send(Sci.SCI_GETLINECOUNT)).coerceAtLeast(1)
@@ -670,6 +688,19 @@ class ScintillaView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!rightToLeft) return touch(event)
+        // In a mirrored view a touch is where it would be in the unmirrored one.
+        val mirrored = MotionEvent.obtain(event)
+        mirror.setScale(-1f, 1f, width / 2f, 0f)
+        mirrored.transform(mirror)
+        try {
+            return touch(mirrored)
+        } finally {
+            mirrored.recycle()
+        }
+    }
+
+    private fun touch(event: MotionEvent): Boolean {
         if (ptr == 0L || displayOnly) return false
         val x = event.x
         val y = event.y
@@ -864,6 +895,7 @@ class ScintillaView @JvmOverloads constructor(
             val left = min(xOf(start), xOf(end)).toInt().coerceIn(0, width)
             val right = max(xOf(start), xOf(end)).toInt().coerceIn(left, width)
             if (bottomOf(start) == bottomOf(end)) outRect.set(left, top, right, bottom) else outRect.set(0, top, width, bottom)
+            if (rightToLeft) outRect.set(width - outRect.right, top, width - outRect.left, bottom)
         }
     }
 
