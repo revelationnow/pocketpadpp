@@ -2396,14 +2396,20 @@ class WalkthroughTest {
         }
         val first = "\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD\n"
         setText(first + "hello world\n")
-        val leftToRight = inkCentre()
-        assertTrue("written from the left, the text is at the left: $leftToRight", leftToRight in 0.0..0.45)
+        // Measured until it holds: the scroll thumb, which shows for a moment after a scroll, counts as ink too.
+        var measured = -1.0
+        waitUntil("the text to be at the left when written from the left", 10000) {
+            measured = inkCentre()
+            measured in 0.0..0.45
+        }
 
         openMenu("View", "Text Direction RTL")
         tapDescribed("Close menu")
         assertTrue(onUi { it.editor.rightToLeft })
-        val rightToLeft = inkCentre()
-        assertTrue("written from the right, it is at the right: $rightToLeft", rightToLeft > 0.55)
+        waitUntil("the text to be at the right when written from the right", 10000) {
+            measured = inkCentre()
+            measured > 0.55
+        }
         shot("text-direction-rtl")
 
         // A touch still lands on the character under the finger.
@@ -2423,8 +2429,10 @@ class WalkthroughTest {
         tapDescribed("Close menu")
         assertTrue(!onUi { it.editor.rightToLeft })
         shot("text-direction-ltr-again")
-        val back = inkCentre()
-        assertTrue("back at the left: $back, text ${text().length} long", back in 0.0..0.45)
+        waitUntil("the text to be back at the left", 10000) {
+            measured = inkCentre()
+            measured in 0.0..0.45
+        }
         onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
     }
 
