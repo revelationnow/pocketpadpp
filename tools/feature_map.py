@@ -94,6 +94,8 @@ IDM_EDIT_AUTOCOMPLETE IDM_EDIT_AUTOCOMPLETE_CURRENTFILE IDM_EDIT_AUTOCOMPLETE_PA
 IDM_EDIT_FUNCCALLTIP_PREVIOUS IDM_EDIT_FUNCCALLTIP_NEXT IDM_VIEW_DOC_MAP
 IDM_VIEW_PROJECT_PANEL_1 IDM_VIEW_PROJECT_PANEL_2 IDM_VIEW_PROJECT_PANEL_3
 IDM_LANG_USER_DLG IDM_LANG_OPENUDLDIR IDM_LANG_UDLCOLLECTION_PROJECT_SITE IDM_LANG_USER
+IDM_VIEW_GOTO_ANOTHER_VIEW IDM_VIEW_CLONE_TO_ANOTHER_VIEW IDM_VIEW_SWITCHTO_OTHER_VIEW IDM_VIEW_SYNSCROLLV
+IDM_VIEW_SYNSCROLLH IDM_VIEW_ZOOM_SYNC IDM_VIEW_GOTO_NEW_INSTANCE IDM_VIEW_LOAD_IN_NEW_INSTANCE
 """.split()) | {f"IDM_VIEW_{kind}_{level}" for kind in ("FOLD", "UNFOLD") for level in range(1, 9)} | {
     name.format(n) for n in range(1, 6) for name in (
         "IDM_SEARCH_MARKALLEXT{}", "IDM_SEARCH_MARKONEEXT{}", "IDM_SEARCH_UNMARKALLEXT{}",
@@ -199,13 +201,39 @@ def clean(label):
     return label.split("\\t")[0].replace("&&", "\0").replace("&", "").replace("\0", "&").replace('""', '"').strip()
 
 
+# Where a finished command works differently from Notepad++'s, in a way worth knowing.
+SECOND_VIEW = "The second view is for reading and copying; Focus on Another View swaps the two so the other document can be edited"
+DONE_NOTES = {
+    "IDM_VIEW_GOTO_ANOTHER_VIEW": SECOND_VIEW,
+    "IDM_VIEW_CLONE_TO_ANOTHER_VIEW": SECOND_VIEW,
+    "IDM_VIEW_SWITCHTO_OTHER_VIEW": "Swaps the documents of the two views",
+    "IDM_VIEW_GOTO_NEW_INSTANCE": "A second window, which keeps no session",
+    "IDM_VIEW_LOAD_IN_NEW_INSTANCE": "A second window, which keeps no session",
+    "IDM_EXECUTE": "Opens an address in another app; Android does not let an app start programs",
+    "IDM_LANG_USER_DLG": "Definitions are edited as the XML files they are, not in a dialog",
+    "IDM_LANG_OPENUDLDIR": "Lists the definitions kept with the app",
+    "IDM_LANG_USER": "The definition last created, imported or edited",
+    "IDM_EDIT_AUTOCOMPLETE_PATH": "Only folders the app may list itself",
+    "IDM_SETTING_EDITCONTEXTMENU": "Chooses extra commands for the selection toolbar",
+    "IDM_FILE_PRINT": "Android's print screen, which can also save a PDF",
+    "IDM_FILE_PRINTNOW": "Android's print screen, which can also save a PDF",
+    "IDM_FILE_OPEN_FOLDER": "For files on the device's own storage",
+    "IDM_EDIT_OPENSELECTEDFILEFOLDERINEXPLORER": "For paths on the device's own storage",
+    "IDM_FILE_CONTAININGFOLDERASWORKSPACE": "The folder picker opens at the file; Android wants the folder confirmed",
+    "IDM_VIEW_MONITORING": "Checked every two seconds, for the tab on screen",
+    "IDM_VIEW_PROJECT_PANEL_1": "Files are added from open tabs or the file picker",
+    "IDM_VIEW_PROJECT_PANEL_2": "Files are added from open tabs or the file picker",
+    "IDM_VIEW_PROJECT_PANEL_3": "Files are added from open tabs or the file picker",
+}
+
+
 def classify(command_id):
     if command_id in DONE_IDS:
         # Count a finished command under the phase it was planned for.
         for pattern, _, phase, _ in RULES:
             if re.match(pattern, command_id):
-                return DONE, phase or 1, ""
-        return DONE, 1, ""
+                return DONE, phase or 1, DONE_NOTES.get(command_id, "")
+        return DONE, 1, DONE_NOTES.get(command_id, "")
     for pattern, status, phase, note in RULES:
         if re.match(pattern, command_id):
             return status, phase, note
@@ -267,7 +295,8 @@ def main(npp):
         for path, label, command_id, status, phase, note in items:
             sub = " > ".join(path[1:])
             # Long uniform lists (languages, character sets) are shown as one row.
-            if menu == "Language" and command_id.startswith("IDM_LANG_") and status == DONE:
+            user_defined = command_id in ("IDM_LANG_USER_DLG", "IDM_LANG_OPENUDLDIR", "IDM_LANG_UDLCOLLECTION_PROJECT_SITE", "IDM_LANG_USER")
+            if menu == "Language" and command_id.startswith("IDM_LANG_") and status == DONE and not user_defined:
                 key = ("__languages__", status, phase, "From Notepad++'s langs.model.xml and stylers.model.xml")
                 collapsed.setdefault(key, []).append(label)
             elif menu == "Encoding" and sub.startswith("Character sets"):

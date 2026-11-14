@@ -75,6 +75,12 @@ class ScintillaView @JvmOverloads constructor(
             isFocusableInTouchMode = !value
         }
 
+    /**
+     * True for a view to read in: it scrolls, selects and copies, but takes no typing. The second view of the
+     * split screen is one, so that every change to a document goes through the one editor that keeps track of them.
+     */
+    var viewOnly = false
+
     /** Called after the caret, selection, text or scroll position changed. Safe to query the editor from here. */
     var onStateChanged: (() -> Unit)? = null
 
@@ -228,7 +234,7 @@ class ScintillaView @JvmOverloads constructor(
 
     /** Types text at every caret, as a hardware keyboard would. */
     fun typeText(text: String) {
-        if (ptr != 0L) ScintillaNative.insertText(ptr, text)
+        if (ptr != 0L && !viewOnly && !displayOnly) ScintillaNative.insertText(ptr, text)
     }
 
     /** True while the on-screen Ctrl or Alt key is held, which turns the next key into a shortcut. */
@@ -821,14 +827,14 @@ class ScintillaView @JvmOverloads constructor(
         private fun populate(menu: Menu) {
             menu.clear()
             if (hasSelection()) {
-                menu.add(Menu.NONE, android.R.id.cut, 0, android.R.string.cut)
+                if (!viewOnly) menu.add(Menu.NONE, android.R.id.cut, 0, android.R.string.cut)
                 menu.add(Menu.NONE, android.R.id.copy, 1, android.R.string.copy)
             }
-            if (clipboard.hasPrimaryClip()) {
+            if (clipboard.hasPrimaryClip() && !viewOnly) {
                 menu.add(Menu.NONE, android.R.id.paste, 2, android.R.string.paste)
             }
             menu.add(Menu.NONE, android.R.id.selectAll, 3, android.R.string.selectAll)
-            extraActions.forEachIndexed { index, (name, _) -> menu.add(Menu.NONE, EXTRA_ACTION + index, 4 + index, name) }
+            if (!viewOnly) extraActions.forEachIndexed { index, (name, _) -> menu.add(Menu.NONE, EXTRA_ACTION + index, 4 + index, name) }
         }
 
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
@@ -870,6 +876,12 @@ class ScintillaView @JvmOverloads constructor(
     /** Handles a key press from a hardware keyboard or one the soft keyboard sent as a key event. */
     internal fun handleKey(event: KeyEvent): Boolean {
         if (ptr == 0L || event.action != KeyEvent.ACTION_DOWN) return false
+        if (viewOnly) {
+            // Moving about and copying are all a reading view does with keys.
+            val copies = event.isCtrlPressed && (event.keyCode == KeyEvent.KEYCODE_C || event.keyCode == KeyEvent.KEYCODE_A)
+            val moves = event.keyCode in READING_KEYS
+            if (!copies && !moves) return false
+        }
         val hardware = (if (event.isShiftPressed) Sci.SCMOD_SHIFT else 0) or
             (if (event.isCtrlPressed) Sci.SCMOD_CTRL else 0) or
             (if (event.isAltPressed) Sci.SCMOD_ALT else 0)
@@ -934,10 +946,10 @@ class ScintillaView @JvmOverloads constructor(
 
     // region Soft keyboard
 
-    override fun onCheckIsTextEditor(): Boolean = !displayOnly
+    override fun onCheckIsTextEditor(): Boolean = !displayOnly && !viewOnly
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
-        if (ptr == 0L) return null
+        if (ptr == 0L || displayOnly || viewOnly) return null
         ScintillaNative.imeFinishComposing(ptr)
         outAttrs.inputType = when (keyboardMode) {
             KeyboardMode.CODE -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
@@ -1101,6 +1113,10 @@ class ScintillaView @JvmOverloads constructor(
         /** Added to n for the F-keys in [onShortcut]: F3 is KEY_FUNCTION + 3. */
         const val KEY_FUNCTION = 0x1000
         private const val EXTRA_ACTION = 0x4000
+        private val READING_KEYS = setOf(
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_MOVE_HOME, KeyEvent.KEYCODE_MOVE_END, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_PAGE_DOWN,
+        )
 
         /** The key of a hardware key press as shortcuts know it, or 0 for keys that cannot be part of one. */
         fun shortcutKeyOf(event: KeyEvent): Int = when (event.keyCode) {

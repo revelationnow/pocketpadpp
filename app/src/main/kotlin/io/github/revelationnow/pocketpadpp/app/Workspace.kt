@@ -388,6 +388,23 @@ class Workspace(
         ThemeApplier.apply(other, theme, LanguageSetup.plan(active.language, languages, theme), otherMetrics)
     }
 
+    /** Gives another view that shows a tab's document, such as the second view of the split screen, that tab's colours. */
+    fun styleDoc(doc: Doc, other: io.github.revelationnow.pocketpadpp.core.SciApi, otherMetrics: ViewMetrics) {
+        val plan = LanguageSetup.plan(doc.language, languages, theme)
+        if (!doc.lexerApplied) {
+            // The lexer belongs to the document, and this view has it attached.
+            LanguageSetup.applyToDocument(other, plan)
+            if (doc.language.user != null) other.sendStrings(Sci.SCI_SETPROPERTY, "userDefine.currentBufferID", doc.id.toString())
+            doc.lexerApplied = true
+        }
+        ThemeApplier.apply(other, theme, plan, otherMetrics)
+    }
+
+    /**
+     * False for a second window: it leaves the session, and the unsaved text kept for it, to the first window.
+     */
+    var keepsSession = true
+
     /** After the user-defined languages were read again: tabs that use one get its new definition, or lose it. */
     fun userLanguagesChanged() {
         for (doc in docs) {
@@ -511,7 +528,7 @@ class Workspace(
     // region Session: open tabs and unsaved text survive the app being closed
 
     private fun writeBackupIfNeeded(doc: Doc) {
-        if (doc !== active) return
+        if (doc !== active || !keepsSession) return
         if (!isDirty(doc)) {
             deleteBackup(doc)
             return
@@ -579,6 +596,7 @@ class Workspace(
     }
 
     fun saveSession() {
+        if (!keepsSession) return
         try {
             sessionFile.writeText(SessionStore.write(sessionNow(withBackups = true)))
         } catch (e: IOException) {

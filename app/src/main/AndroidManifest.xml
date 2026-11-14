@@ -39,6 +39,14 @@
                 <data android:mimeType="application/x-httpd-php" />
             </intent-filter>
         </activity>
+
+        <!-- View > Open in New Instance: a second window, with no session of its own. -->
+        <activity
+            android:name=".SecondWindowActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale"
+            android:documentLaunchMode="always"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>

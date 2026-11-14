@@ -88,7 +88,10 @@ import kotlin.math.roundToInt
  * The editor screen: toolbar, document tabs, the Scintilla view, find bar, extra keys and status bar.
  * Menus follow Notepad++'s layout and wording so that they stay familiar.
  */
-class MainActivity : Activity() {
+open class MainActivity : Activity() {
+
+    /** True for a window opened with Open in New Instance: it shows what it was given and keeps no session. */
+    protected open val secondWindow: Boolean = false
 
     // Internal rather than private so that the on-device tests can inspect them.
     internal lateinit var editor: ScintillaView
@@ -130,6 +133,7 @@ class MainActivity : Activity() {
     private val modifierKeys = LinkedHashMap<Int, Button>()
     private lateinit var root: LinearLayout
     private lateinit var editorRow: LinearLayout
+    private lateinit var splitArea: LinearLayout
     internal var documentMap: DocumentMap? = null
     private var themeName = ""
 
@@ -202,10 +206,14 @@ class MainActivity : Activity() {
             )
         }
         workspace.onTabsChanged = { refreshTabs() }
+        workspace.keepsSession = !secondWindow
         workspace.afterStyle = {
             options.apply(editor, resources.displayMetrics.density)
             styleDocumentMap()
+            styleOtherView()
         }
+        syncVertical = prefs.getBoolean("syncVertical", false)
+        syncHorizontal = prefs.getBoolean("syncHorizontal", false)
         workspace.newDocumentEol = Eol.fromSciMode(prefs.getInt("newEol", Eol.LF.sciMode))
         workspace.newDocumentEncoding = TextEncodings.byId(prefs.getString("newEncoding", null)) ?: TextEncodings.UTF8
         // The tab the app starts with was made before these settings were read.
@@ -227,7 +235,10 @@ class MainActivity : Activity() {
         editor.onMacroStep = { message, wParam, lParam, text ->
             if (recording && !macroPaused) currentMacro += MacroStep(message, wParam, lParam, text)
         }
-        editor.onZoomChanged = { ThemeApplier.updateLineNumberWidth(editor, showLineNumbers) }
+        editor.onZoomChanged = {
+            ThemeApplier.updateLineNumberWidth(editor, showLineNumbers)
+            zoomOtherView()
+        }
         editor.onShortcut = { key, modifiers -> shortcut(key, modifiers) }
         editor.onCopied = { text ->
             clipHistory.remove(text)
@@ -240,7 +251,7 @@ class MainActivity : Activity() {
         editor.requestFocus()
         refreshTabs()
 
-        restoreSession { handleIntent(intent) }
+        if (secondWindow) handleIntent(intent) else restoreSession { handleIntent(intent) }
     }
 
     /**
@@ -297,7 +308,13 @@ class MainActivity : Activity() {
             (map.parent as? ViewGroup)?.removeView(map)
             editorRow.addView(map, LinearLayout.LayoutParams(dp(MAP_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
         }
-        root.addView(editorRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        // The editor row, and beside or below it the second view when the screen is split.
+        splitArea = LinearLayout(themed)
+        splitArea.addView(editorRow)
+        root.addView(splitArea, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        otherPane = null
+        if (otherDoc != null) addOtherPane()
+        layoutSplit()
 
         results = ResultsPanel(themed, palette)
         results.onOpen = { group, hit -> goToHit(group, hit) }
@@ -361,6 +378,7 @@ class MainActivity : Activity() {
         destroyed = true
         io.shutdown()
         searchEditor?.destroy()
+        otherView?.destroy()
         editor.destroy()
         super.onDestroy()
     }
@@ -372,8 +390,20 @@ class MainActivity : Activity() {
             findBar.isOpen -> findBar.close()
             results.isOpen -> results.close()
             fullScreen -> setScreenMode(full = false, bare = false)
+            // A second window keeps no session, so what is unsaved in it would be gone.
+            secondWindow && workspace.docs.any { workspace.isDirty(it) } -> AlertDialog.Builder(themed)
+                .setTitle("Close this window?")
+                .setMessage("It has unsaved changes, and a second window does not keep them for next time.")
+                .setPositiveButton("Close without saving") { _, _ -> finish() }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
             else -> super.onBackPressed()
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        layoutSplit()
     }
 
     private fun barButton(label: String, description: String, onClick: (View) -> Unit): Button =
@@ -721,6 +751,8 @@ class MainActivity : Activity() {
     // region Keeping the chrome in step with the editor
 
     private fun refreshTabs() {
+        // The second view follows its document: gone with it, renamed with it.
+        otherDoc?.let { if (it !in workspace.docs) closeOtherView() else otherTitle?.text = it.name }
         shownDirty = workspace.isDirty(workspace.active)
         tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, workspace.isDirty(it), it === workspace.active, it.colour, it.pinned) })
         updateStatus()
@@ -728,6 +760,7 @@ class MainActivity : Activity() {
 
     private fun onEditorStateChanged() {
         documentMap?.sync()
+        otherView?.let { followScroll(editor, it, mainScroll, otherScroll) }
         completionFollowsCaret()
         if (workspace.isDirty(workspace.active) != shownDirty) refreshTabs() else updateStatus()
         workspace.lineCountMayHaveChanged()
@@ -1491,6 +1524,27 @@ class MainActivity : Activity() {
             item("Zoom In") { zoom { editor.send(Sci.SCI_ZOOMIN) } }
             item("Zoom Out") { zoom { editor.send(Sci.SCI_ZOOMOUT) } }
             item("Restore Default Zoom") { zoom { editor.send(Sci.SCI_SETZOOM, 0) } }
+            val together = prefs.getBoolean("zoomSync", true)
+            item("Synchronize Across Views", checked = together) {
+                prefs.edit().putBoolean("zoomSync", !together).apply()
+                zoomOtherView()
+            }
+        }
+        sub("Move/Clone Current Document") {
+            val stored = workspace.active.uri != null
+            item("Move to Other View") { moveToOtherView() }
+            item("Clone to Other View") { showOtherView(workspace.active) }
+            item("Move to New Instance", enabled = stored) { openInNewWindow(move = true) }
+            item("Open in New Instance", enabled = stored) { openInNewWindow(move = false) }
+        }
+        item("Focus on Another View", enabled = otherDoc != null) { swapViews() }
+        item("Synchronize Vertical Scrolling", checked = syncVertical) {
+            syncVertical = !syncVertical
+            prefs.edit().putBoolean("syncVertical", syncVertical).apply()
+        }
+        item("Synchronize Horizontal Scrolling", checked = syncHorizontal) {
+            syncHorizontal = !syncHorizontal
+            prefs.edit().putBoolean("syncHorizontal", syncHorizontal).apply()
         }
         item("Toggle Full Screen Mode", checked = fullScreen && !distractionFree) { setScreenMode(full = !fullScreen || distractionFree, bare = false) }
         item("Distraction Free Mode", checked = distractionFree) { setScreenMode(full = !distractionFree, bare = !distractionFree) }
@@ -1542,6 +1596,7 @@ class MainActivity : Activity() {
     private fun zoom(change: () -> Unit) {
         change()
         ThemeApplier.updateLineNumberWidth(editor, showLineNumbers)
+        zoomOtherView()
     }
 
     private fun MenuSpec.encodingMenu() {
@@ -3238,6 +3293,193 @@ class MainActivity : Activity() {
 
     // endregion
 
+    // region Split screen: the second view
+
+    // Notepad++ can show two documents, or one document twice, side by side. Here the second view is for
+    // reading: it scrolls, selects and copies, while typing and every command go to the editor proper.
+    // Swapping the two (Focus on Another View) is how the other document comes under the keyboard.
+    internal var otherView: ScintillaView? = null
+    internal var otherDoc: Doc? = null
+    private var otherPane: LinearLayout? = null
+    private var otherTitle: TextView? = null
+    private var syncVertical = false
+    private var syncHorizontal = false
+    private val mainScroll = longArrayOf(0, 0)
+    private val otherScroll = longArrayOf(0, 0)
+
+    /** Side by side on a wide screen, one above the other on a tall one. */
+    private fun layoutSplit() {
+        val wide = resources.displayMetrics.widthPixels > resources.displayMetrics.heightPixels
+        splitArea.orientation = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        for (index in 0 until splitArea.childCount) {
+            splitArea.getChildAt(index).layoutParams =
+                if (wide) LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+        splitArea.requestLayout()
+    }
+
+    private fun addOtherPane() {
+        val view = otherView ?: return
+        (view.parent as? ViewGroup)?.removeView(view)
+        val title = TextView(themed).apply {
+            contentDescription = "Other view"
+            text = otherDoc?.name ?: ""
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(palette.chromeText)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            setPadding(dp(10f), 0, dp(6f), 0)
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        otherTitle = title
+        val header = LinearLayout(themed).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(palette.chrome)
+            addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            addView(barButton("\u21C5", "Focus on Another View") { swapViews() }, LinearLayout.LayoutParams(dp(44f), ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(barButton("\u2715", "Close other view") { closeOtherView() }, LinearLayout.LayoutParams(dp(44f), ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        val pane = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(View(themed).apply { setBackgroundColor(palette.accent) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2f)))
+            addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30f)))
+            addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+        otherPane = pane
+        splitArea.addView(pane)
+        layoutSplit()
+    }
+
+    /** Shows a document in the second view, opening that view if need be. */
+    internal fun showOtherView(doc: Doc) {
+        val view = otherView ?: ScintillaView(this).apply {
+            viewOnly = true
+            onStateChanged = { otherView?.let { followScroll(it, editor, otherScroll, mainScroll) } }
+        }.also { otherView = it }
+        otherDoc = doc
+        view.send(Sci.SCI_SETDOCPOINTER, 0, doc.sciDoc)
+        view.documentSwitched()
+        if (otherPane == null) addOtherPane() else otherTitle?.text = doc.name
+        styleOtherView()
+        rememberScroll(view, otherScroll)
+        rememberScroll(editor, mainScroll)
+    }
+
+    internal fun closeOtherView() {
+        val view = otherView ?: return
+        otherPane?.let { splitArea.removeView(it) }
+        otherPane = null
+        otherTitle = null
+        otherDoc = null
+        otherView = null
+        view.destroy()
+        layoutSplit()
+        editor.requestFocus()
+    }
+
+    /** The second view takes the looks of the first: theme, font, options, wrapping and, if asked, zoom. */
+    private fun styleOtherView() {
+        val view = otherView ?: return
+        val doc = otherDoc ?: return
+        workspace.styleDoc(
+            doc, view,
+            ViewMetrics(
+                fontName = fontName, fontSize = fontSize, foldMarginWidth = dp(22f), leftPadding = dp(4f),
+                showLineNumbers = showLineNumbers, pixelScale = resources.displayMetrics.density,
+            ),
+        )
+        options.apply(view, resources.displayMetrics.density)
+        view.send(Sci.SCI_SETWRAPMODE, editor.send(Sci.SCI_GETWRAPMODE))
+        zoomOtherView()
+    }
+
+    private fun zoomOtherView() {
+        val view = otherView ?: return
+        if (prefs.getBoolean("zoomSync", true)) view.send(Sci.SCI_SETZOOM, editor.send(Sci.SCI_GETZOOM))
+        ThemeApplier.updateLineNumberWidth(view, showLineNumbers)
+    }
+
+    /** View > Move to Other View: the document goes below, and the editor moves on to the tab next to it. */
+    private fun moveToOtherView() {
+        val doc = workspace.active
+        val docs = workspace.docs
+        val index = docs.indexOf(doc)
+        if (docs.size > 1) workspace.activate(docs[if (index == docs.size - 1) index - 1 else index + 1])
+        showOtherView(doc)
+    }
+
+    private class ViewPlace(val caret: Long, val anchor: Long, val line: Long, val x: Long)
+
+    private fun place(view: ScintillaView) = ViewPlace(
+        view.send(Sci.SCI_GETCURRENTPOS), view.send(Sci.SCI_GETANCHOR),
+        view.send(Sci.SCI_DOCLINEFROMVISIBLE, view.send(Sci.SCI_GETFIRSTVISIBLELINE)), view.send(Sci.SCI_GETXOFFSET),
+    )
+
+    private fun goTo(view: ScintillaView, place: ViewPlace) {
+        view.send(Sci.SCI_SETANCHOR, place.anchor)
+        view.send(Sci.SCI_SETCURRENTPOS, place.caret)
+        view.send(Sci.SCI_SETFIRSTVISIBLELINE, view.send(Sci.SCI_VISIBLEFROMDOCLINE, place.line))
+        view.send(Sci.SCI_SETXOFFSET, place.x)
+    }
+
+    /** View > Focus on Another View: the two views trade documents and places, so the other one can be edited. */
+    internal fun swapViews() {
+        val view = otherView ?: return
+        val below = otherDoc ?: return
+        val above = workspace.active
+        val placeBelow = place(view)
+        val placeAbove = place(editor)
+        if (below !== above) {
+            workspace.activate(below)
+            showOtherView(above)
+        }
+        goTo(editor, placeBelow)
+        goTo(view, placeAbove)
+        rememberScroll(editor, mainScroll)
+        rememberScroll(view, otherScroll)
+        editor.requestFocus()
+        updateStatus()
+    }
+
+    private fun rememberScroll(view: ScintillaView, at: LongArray) {
+        at[0] = view.send(Sci.SCI_GETFIRSTVISIBLELINE)
+        at[1] = view.send(Sci.SCI_GETXOFFSET)
+    }
+
+    /** Synchronized scrolling: what one view moved by, the other moves by too. */
+    private fun followScroll(moved: ScintillaView, follower: ScintillaView, was: LongArray, followerWas: LongArray) {
+        val line = moved.send(Sci.SCI_GETFIRSTVISIBLELINE)
+        val x = moved.send(Sci.SCI_GETXOFFSET)
+        if (syncVertical && line != was[0]) follower.send(Sci.SCI_LINESCROLL, 0, line - was[0])
+        if (syncHorizontal && x != was[1]) follower.send(Sci.SCI_SETXOFFSET, (follower.send(Sci.SCI_GETXOFFSET) + x - was[1]).coerceAtLeast(0))
+        was[0] = line
+        was[1] = x
+        // The follower will report its own move; it is not to be passed back.
+        rememberScroll(follower, followerWas)
+    }
+
+    /** View > Open in New Instance and Move to New Instance: the file in a window of its own. */
+    private fun openInNewWindow(move: Boolean) {
+        val doc = workspace.active
+        val uri = doc.uri ?: return
+        if (move && workspace.isDirty(doc)) return toast("Save the document first")
+        try {
+            startActivity(
+                Intent(this, SecondWindowActivity::class.java).setData(uri).setAction(Intent.ACTION_VIEW).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                ),
+            )
+            if (move) workspace.close(doc)
+        } catch (e: Exception) {
+            toast("This device cannot open a second window")
+        }
+    }
+
+    // endregion
+
     // region Project Panels
 
     // Notepad++'s three Project Panels, each a workspace file of projects, folders and files kept with the app.
@@ -3925,6 +4167,7 @@ class MainActivity : Activity() {
             put("Macro > Stop Recording", key(CTRL or SHIFT, 'R'.code))
             put("Macro > Playback", key(CTRL or SHIFT, 'P'.code))
             put("Run > Run...", key(0, f(5)))
+            put("View > Focus on Another View", key(0, f(8)))
             put("Edit > Auto-Completion > Function Completion", key(CTRL, ' '.code))
             put("Edit > Auto-Completion > Word Completion", key(CTRL, Sci.SCK_RETURN))
             put("Edit > Auto-Completion > Function Parameters Hint", key(CTRL or SHIFT, ' '.code))

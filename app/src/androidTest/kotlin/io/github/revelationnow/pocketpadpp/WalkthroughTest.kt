@@ -2281,6 +2281,96 @@ class WalkthroughTest {
         }
     }
 
+    @Test
+    fun splitViewAndSecondWindow() {
+        fun active() = onUi { it.workspace.active.name }
+        fun otherLine() = onUi { it.otherView!!.send(Sci.SCI_GETFIRSTVISIBLELINE) }
+        fun otherName() = onUi { it.otherDoc?.name }
+        setText((1..300).joinToString("\n") { "row $it" })
+
+        // Clone to Other View: the same document twice, the second time for reading.
+        openMenu("View", "Move/Clone Current Document", "Clone to Other View")
+        assertNotNull(onUi { it.otherView })
+        assertTrue("both views show one document", onUi { it.otherView!!.send(Sci.SCI_GETDOCPOINTER) == it.editor.send(Sci.SCI_GETDOCPOINTER) })
+        assertTrue(device.wait(Until.hasObject(By.desc("Other view")), 3000) == true)
+        sci(Sci.SCI_DOCUMENTSTART)
+        onUi { it.editor.typeText("TOP ") }
+        assertTrue("what is typed above shows below", onUi { it.otherView!!.text.startsWith("TOP row 1") })
+        onUi { it.otherView!!.typeText("x") }
+        assertTrue("the second view takes no typing", text().startsWith("TOP row 1\n"))
+        shot("split-clone")
+
+        // Synchronized scrolling works both ways, and the zoom is shared.
+        openMenu("View", "Synchronize Vertical Scrolling")
+        tapDescribed("Close menu")
+        sci(Sci.SCI_SETFIRSTVISIBLELINE, 100)
+        waitUntil("the second view to scroll along") { otherLine() == 100L }
+        onUi { it.otherView!!.send(Sci.SCI_LINESCROLL, 0, 20) }
+        waitUntil("the editor to follow the second view") { sci(Sci.SCI_GETFIRSTVISIBLELINE) == 120L }
+        shot("split-scrolled-together")
+        openMenu("View", "Synchronize Vertical Scrolling")
+        tapDescribed("Close menu")
+        openMenu("View", "Zoom", "Zoom In")
+        assertEquals("the second view zooms along", sci(Sci.SCI_GETZOOM), onUi { it.otherView!!.send(Sci.SCI_GETZOOM) })
+        openMenu("View", "Zoom", "Restore Default Zoom")
+
+        // Move to Other View puts the document below and leaves the editor on its neighbour.
+        tap("New")
+        setText("second document")
+        openMenu("View", "Move/Clone Current Document", "Move to Other View")
+        assertEquals("new 2", otherName())
+        assertEquals("new 1", active())
+        assertEquals("second document", onUi { it.otherView!!.text })
+        shot("split-move")
+
+        // Focus on Another View swaps the two, which is how the other document gets edited.
+        tapDescribed("Focus on Another View")
+        assertEquals("new 2", active())
+        assertEquals("new 1", otherName())
+        assertEquals("second document", text())
+        assertTrue(onUi { it.otherView!!.text.startsWith("TOP row 1") })
+        onUi { it.editor.typeText("edited ") }
+        assertTrue(text().contains("edited "))
+        tapDescribed("Close other view")
+        assertNull(onUi { it.otherView })
+        assertTrue(device.findObject(By.desc("Other view")) == null)
+
+        // The second view goes when its document is closed.
+        onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
+        openMenu("View", "Move/Clone Current Document", "Clone to Other View")
+        assertEquals("new 2", otherName())
+        tapDescribed("Close new 2")
+        assertNull("closing the tab closes its second view", onUi { it.otherView })
+
+        // Open in New Instance: the file in a window of its own, while it stays open here.
+        val file = File(context.cacheDir, "window.txt").apply { writeText("in a window of its own\n") }
+        onUi { it.openUris(listOf(Uri.fromFile(file))) }
+        waitUntil("the file to open") { active() == "window.txt" }
+        val monitor = instrumentation.addMonitor(SecondWindowActivity::class.java.name, null, false)
+        try {
+            openMenu("View", "Move/Clone Current Document", "Open in New Instance")
+            val second = monitor.waitForActivityWithTimeout(15000) as? MainActivity
+            assertNotNull("a second window opened", second)
+            fun inSecond(): String {
+                var name = ""
+                instrumentation.runOnMainSync { name = second!!.workspace.active.name }
+                return name
+            }
+            waitUntil("the file to show in the second window") { inSecond() == "window.txt" }
+            device.waitForIdle()
+            shot("second-window")
+            var tabs = 0
+            instrumentation.runOnMainSync { tabs = second!!.workspace.docs.size }
+            assertEquals("the second window has just that file", 1, tabs)
+            instrumentation.runOnMainSync { second!!.finish() }
+            device.waitForIdle()
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
+        assertEquals("the file is still open in the first window", "window.txt", active())
+        onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
+    }
+
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */
     @Test
     fun readmeScreens() {
