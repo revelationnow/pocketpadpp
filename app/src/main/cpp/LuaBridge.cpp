@@ -133,7 +133,14 @@ void TimeHook(lua_State *L, lua_Debug *) {
 		// From here on every instruction ends up here, so that a script which catches the error and
 		// carries on is stopped again at once, level after level, until it is out.
 		lua_sethook(L, TimeHook, LUA_MASKCOUNT, 1);
-		luaL_error(L, "the script was stopped: it ran for more than %d seconds", std::max(1, state->timeLimitMs / 1000));
+		// Said without a place in the script: where it happened to be when time ran out means nothing.
+		const int seconds = state->timeLimitMs / 1000;
+		if (seconds <= 1) {
+			lua_pushliteral(L, "the script was stopped: it ran for more than a second");
+		} else {
+			lua_pushfstring(L, "the script was stopped: it ran for more than %d seconds", seconds);
+		}
+		lua_error(L);
 	}
 }
 
