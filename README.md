@@ -24,6 +24,8 @@ see [Credits](#credits) for what it owes to it.
 | Notepad++'s default theme | Dark mode | 22 more Notepad++ themes |
 | <img src="docs/screenshots/menu.png" width="250" alt="The Edit menu opened at Line Operations"> | <img src="docs/screenshots/find.png" width="250" alt="The find bar counting matches above the keyboard"> | <img src="docs/screenshots/column.png" width="250" alt="A column selection made with the Alt key locked"> |
 | Notepad++'s menus, one level at a time | Find and replace above the keyboard | Column selection with the Alt key |
+| <img src="docs/screenshots/compare.png" width="250" alt="Two documents compared, with added, removed and changed lines tinted"> | <img src="docs/screenshots/compare-dark.png" width="250" alt="The same comparison in dark mode"> | <img src="docs/screenshots/hex.png" width="250" alt="A binary file shown as offsets, hex bytes and text"> |
+| Compare, built in | Compare in dark mode | Hex Editor, built in |
 
 ## Why
 
