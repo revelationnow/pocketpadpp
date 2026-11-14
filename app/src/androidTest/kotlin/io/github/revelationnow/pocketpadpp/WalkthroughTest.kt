@@ -1684,9 +1684,11 @@ class WalkthroughTest {
         find("app.log").click()
         device.waitForIdle()
         openMenu("View", "Tab", "Pin Tab")
+        tapDescribed("Close menu")
         assertEquals("app.log", names().first())
         assertEquals(listOf("app.log"), pinned())
-        assertTrue("the pinned tab shows a pin", device.wait(Until.hasObject(By.text(Pattern.compile(".*\\uD83D\\uDCCC.*app\\.log"))), 3000) == true)
+        val tab = device.wait(Until.findObject(By.textEndsWith("app.log")), 3000)
+        assertTrue("the pinned tab shows a pin: ${tab?.text}", tab != null && tab.text.startsWith("\uD83D\uDCCC"))
         shot("tab-pinned")
         openMenu("File", "Close Multiple Documents", "Close All but Pinned Documents")
         assertEquals("only the pinned tab is left", listOf("app.log"), names())
@@ -1694,6 +1696,7 @@ class WalkthroughTest {
 
         // Monitoring: the file is read-only here and follows what another program writes to it.
         openMenu("View", "Monitoring (tail -f)")
+        tapDescribed("Close menu")
         assertEquals("read-only while monitoring", 1L, sci(Sci.SCI_GETREADONLY))
         SystemClock.sleep(1100)
         log.appendText("request 1\nrequest 2\n")
@@ -1702,6 +1705,7 @@ class WalkthroughTest {
         assertEquals(1L, sci(Sci.SCI_GETREADONLY))
         shot("monitoring")
         openMenu("View", "Monitoring (tail -f)")
+        tapDescribed("Close menu")
         assertEquals("editable again", 0L, sci(Sci.SCI_GETREADONLY))
 
         // Pinned tabs are remembered.
@@ -1926,7 +1930,6 @@ class WalkthroughTest {
         val (x, y) = pointOf(3)
         longPressAt(x, y)
         shot("selection-toolbar")
-        device.pressBack()
         onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
     }
 
@@ -2006,15 +2009,15 @@ class WalkthroughTest {
         val c = "#include <stdio.h>\n\n/* int hidden(void) { } */\nstatic int add(int a, int b)\n{\n    return a + b;\n}\n\nint main(void)\n{\n    return add(1, 2);\n}\n"
         setText(c, "c")
         openMenu("View", "Function List")
-        panelRow("add")
-        panelRow("main")
-        assertTrue("a function inside a comment is not listed", device.findObject(By.text("hidden")) == null)
+        panelRow("add(int a, int b)")
+        panelRow("main(void)")
+        assertTrue("a function inside a comment is not listed", device.findObject(By.textStartsWith("hidden")) == null)
         tap("Sort: as written")
         assertTrue(onScreen("Sort: A\u2013Z"))
         shot("function-list-c")
         tap("Documents")
         tap("Functions")
-        panelRow("main").click()
+        panelRow("main(void)").click()
         device.waitForIdle()
         assertEquals(8L, sci(Sci.SCI_LINEFROMPOSITION, sci(Sci.SCI_GETCURRENTPOS)))
 
