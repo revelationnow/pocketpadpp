@@ -54,6 +54,9 @@ and saves a screenshot at every step. It covers:
   comparing again while typing, compare with the clipboard and with the saved file, clearing
 - the Hex Editor plugin: a binary file's bytes shown and saved exactly, typing in the hex and text columns,
   insert, delete, undo, go to offset, find, switching tabs, and bytes typed into an unsaved text
+- Lua scripting: the console, a Notepad++ menu command by its id, a script run from a tab that adds a command
+  with a shortcut and a handler that tidies a file as it is saved, an endless loop being stopped, and the
+  startup script taking effect on save and at the next start
 - highlighting for C++, Python, HTML and JSON
 
 Long menus are not swiped through: the test asks the app to bring the wanted row on screen and then taps
@@ -92,6 +95,8 @@ Editor:
 - User-defined languages are edited as their XML definition files; there is no form for it.
 - Compare shows the old text in the second view, so it shares that view's limits, and it turns word wrap
   off while it is shown. Texts that differ in more than a few thousand lines are compared roughly.
+- Lua scripts run on the app's one thread: while a script runs the app waits, for five seconds at most.
+  What LuaScript has and this does not is listed in [LUA.md](LUA.md#differences-from-luascript).
 - The Hex Editor holds the whole file in memory (16 MB at most), overwrites rather than inserts as you
   type, and has no selection, copy or paste yet. Bytes changed in a saved file are not part of the
   session backup: they are lost if Android closes the app before they are saved.

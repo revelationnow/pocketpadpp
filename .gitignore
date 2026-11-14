@@ -16,3 +16,4 @@ hosttest/build/
 hosttest/out/
 
 .DS_Store
+__pycache__/

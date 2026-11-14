@@ -281,10 +281,10 @@ def main(npp):
         remaining = sum(n for (p, s), n in by_phase.items() if p == phase and s != DONE)
         out.append(f"| {phase} | {scope} | {done} | {remaining} |")
     out += ["",
-            "Not counted above because they are not menu commands: the plugin system (Notepad++ plugins are",
-            "Windows DLLs and cannot be loaded; an extension mechanism of our own would be a separate project),",
+            "Not counted above because they are not menu commands: plugins (Notepad++ plugins are Windows DLLs",
+            "and cannot be loaded; Compare, the Hex Editor and Lua scripting are built in instead, see the README),",
             "and behaviour that lives in Preferences such as auto-completion settings, backup intervals and",
-            "the many editing options, which phase 5 will inventory separately.", "",
+            "the many editing options.", "",
             "Regular expressions currently use the C++ standard library's ECMAScript syntax; Notepad++ uses",
             "Boost.Regex (Perl syntax, including lookbehind and `\\K`). Matching that is a phase 3 item.", ""]
 

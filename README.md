@@ -98,7 +98,10 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - Markdown is highlighted out of the box, with the definitions Notepad++ itself ships
 
 **Plugins**
-- Notepad++'s two best-known plugins are built in, under a Plugins menu of their own
+- Notepad++'s best-known plugins are built in, under a Plugins menu of their own
+- Lua Script: write your own commands. A real Lua 5.4 with the `editor` and `npp` objects of Notepad++'s
+  LuaScript plugin, a console, a startup script, commands with shortcuts and handlers for events such as
+  saving a file. See [docs/LUA.md](docs/LUA.md)
 - Compare: two documents one above the other with added, removed and changed lines tinted, the changed
   characters marked and blank rows keeping the two level; next / previous difference, compare with the
   clipboard or with the file as last saved, ignore case or spaces, and the comparison follows your typing
@@ -179,7 +182,7 @@ The [feature map](docs/FEATURES.md) lists every Notepad++ command with its statu
 |---|---|
 | Search | Notepad++'s regular expression syntax in Find and Replace |
 | Languages | A form for defining a language, in place of editing its XML |
-| Plugins | Notepad++ plugins are Windows libraries and cannot run as they are. Compare and the Hex Editor are built in; a way to script smaller plugins is planned |
+| Plugins | Notepad++ plugins are Windows libraries and cannot run as they are. Compare, the Hex Editor and Lua scripting are built in; more of the popular plugins can follow the same way |
 
 Known gaps in what exists are listed in [docs/TESTING.md](docs/TESTING.md#known-gaps). The ones you are most
 likely to meet: regular expressions use ECMAScript syntax for now (no lookbehind), folds are not remembered
@@ -189,7 +192,7 @@ across restarts, files over 64 MB are refused, and the second view of the split 
 
 | Path | What |
 |---|---|
-| `third_party/` | Scintilla 5.6.9 and Lexilla 5.5.5, unmodified, as shipped in Notepad++ |
+| `third_party/` | Scintilla 5.6.9 and Lexilla 5.5.5, unmodified, as shipped in Notepad++, and Lua 5.4.8 |
 | `app/src/main/cpp/` | Scintilla platform layer for Android (C++), including soft keyboard text handling |
 | `app/src/main/java/.../scintilla/` | The JNI boundary: four small Java interfaces, native entry points, generated constants |
 | `app/src/main/kotlin/.../editor/` | `ScintillaView`: drawing, touch scrolling, selection handles, gestures, input connection |

@@ -299,6 +299,10 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
 		Log("Failed to register ScintillaNative methods");
 		ok = false;
 	}
+	if (!RegisterLua(env)) {
+		Log("Failed to register LuaNative methods");
+		ok = false;
+	}
 	ClearException(env);
 	return ok ? JNI_VERSION_1_6 : JNI_ERR;
 }

@@ -64,6 +64,9 @@ bool ClearException(JNIEnv *env) noexcept;
 
 void Log(const char *format, ...) noexcept;
 
+/** Registers the native methods of LuaNative (LuaBridge.cpp). */
+bool RegisterLua(JNIEnv *env);
+
 /** UTF-8 to UTF-16. Invalid bytes become U+FFFD so the result is always well formed. */
 std::u16string Utf16FromUtf8(std::string_view utf8);
 /** UTF-16 to UTF-8. Unpaired surrogates become U+FFFD. */

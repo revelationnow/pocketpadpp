@@ -1,0 +1,481 @@
+IDM_FILE_NEW	41001	File > New
+IDM_FILE_OPEN	41002	File > Open...
+IDM_FILE_OPEN_FOLDER	41019	File > Open Containing Folder > Explorer
+IDM_FILE_OPEN_CMD	41020	File > Open Containing Folder > cmd
+IDM_FILE_OPEN_POWERSHELL	41027	File > Open Containing Folder > PowerShell
+IDM_FILE_CONTAININGFOLDERASWORKSPACE	41025	File > Open Containing Folder > Folder as Workspace
+IDM_FILE_OPEN_DEFAULT_VIEWER	41023	File > Open in Default Viewer
+IDM_FILE_OPENFOLDERASWORKSPACE	41022	File > Open Folder as Workspace...
+IDM_FILE_RELOAD	41014	File > Reload from Disk
+IDM_FILE_SAVE	41006	File > Save
+IDM_FILE_SAVEAS	41008	File > Save As...
+IDM_FILE_SAVECOPYAS	41015	File > Save a Copy As...
+IDM_FILE_SAVEALL	41007	File > Save All
+IDM_FILE_RENAME	41017	File > Rename...
+IDM_FILE_CLOSE	41003	File > Close
+IDM_FILE_CLOSEALL	41004	File > Close All
+IDM_FILE_CLOSEALL_BUT_CURRENT	41005	File > Close Multiple Documents > Close All but Active Document
+IDM_FILE_CLOSEALL_BUT_PINNED	41026	File > Close Multiple Documents > Close All but Pinned Documents
+IDM_FILE_CLOSEALL_TOLEFT	41009	File > Close Multiple Documents > Close All to the Left
+IDM_FILE_CLOSEALL_TORIGHT	41018	File > Close Multiple Documents > Close All to the Right
+IDM_FILE_CLOSEALL_UNCHANGED	41024	File > Close Multiple Documents > Close All Unchanged
+IDM_FILE_DELETE	41016	File > Move to Recycle Bin
+IDM_FILE_LOADSESSION	41012	File > Load Session...
+IDM_FILE_SAVESESSION	41013	File > Save Session...
+IDM_FILE_PRINT	41010	File > Print...
+IDM_FILE_PRINTNOW	1001	File > Print Now
+IDM_FILE_EXIT	41011	File > Exit
+IDM_EDIT_UNDO	42003	Edit > Undo
+IDM_EDIT_REDO	42004	Edit > Redo
+IDM_EDIT_CUT	42001	Edit > Cut
+IDM_EDIT_COPY	42002	Edit > Copy
+IDM_EDIT_PASTE	42005	Edit > Paste
+IDM_EDIT_DELETE	42006	Edit > Delete
+IDM_EDIT_SELECTALL	42007	Edit > Select All
+IDM_EDIT_BEGINENDSELECT	42020	Edit > Begin/End Select
+IDM_EDIT_BEGINENDSELECT_COLUMNMODE	42089	Edit > Begin/End Select in Column Mode
+IDM_EDIT_INSERT_DATETIME_SHORT	42084	Edit > Insert > Date Time (short)
+IDM_EDIT_INSERT_DATETIME_LONG	42085	Edit > Insert > Date Time (long)
+IDM_EDIT_INSERT_DATETIME_CUSTOMIZED	42086	Edit > Insert > Date Time (customized)
+IDM_EDIT_FULLPATHTOCLIP	42029	Edit > Copy to Clipboard > Copy Current Full File path
+IDM_EDIT_FILENAMETOCLIP	42030	Edit > Copy to Clipboard > Copy Current Filename
+IDM_EDIT_CURRENTDIRTOCLIP	42031	Edit > Copy to Clipboard > Copy Current Dir. Path
+IDM_EDIT_COPY_ALL_NAMES	42087	Edit > Copy to Clipboard > Copy All Filenames
+IDM_EDIT_COPY_ALL_PATHS	42088	Edit > Copy to Clipboard > Copy All File Paths
+IDM_EDIT_INS_TAB	42008	Edit > Indent > Increase Line Indent
+IDM_EDIT_RMV_TAB	42009	Edit > Indent > Decrease Line Indent
+IDM_EDIT_UPPERCASE	42016	Edit > Convert Case to > UPPERCASE
+IDM_EDIT_LOWERCASE	42017	Edit > Convert Case to > lowercase
+IDM_EDIT_PROPERCASE_FORCE	42067	Edit > Convert Case to > Proper Case
+IDM_EDIT_PROPERCASE_BLEND	42068	Edit > Convert Case to > Proper Case (blend)
+IDM_EDIT_SENTENCECASE_FORCE	42069	Edit > Convert Case to > Sentence case
+IDM_EDIT_SENTENCECASE_BLEND	42070	Edit > Convert Case to > Sentence case (blend)
+IDM_EDIT_INVERTCASE	42071	Edit > Convert Case to > iNVERT cASE
+IDM_EDIT_RANDOMCASE	42072	Edit > Convert Case to > ranDOm CasE
+IDM_EDIT_DUP_LINE	42010	Edit > Line Operations > Duplicate Current Line
+IDM_EDIT_REMOVE_ANY_DUP_LINES	42079	Edit > Line Operations > Remove Duplicate Lines
+IDM_EDIT_REMOVE_CONSECUTIVE_DUP_LINES	42077	Edit > Line Operations > Remove Consecutive Duplicate Lines
+IDM_EDIT_SPLIT_LINES	42012	Edit > Line Operations > Split Lines
+IDM_EDIT_JOIN_LINES	42013	Edit > Line Operations > Join Lines
+IDM_EDIT_LINE_UP	42014	Edit > Line Operations > Move Up Current Line
+IDM_EDIT_LINE_DOWN	42015	Edit > Line Operations > Move Down Current Line
+IDM_EDIT_REMOVEEMPTYLINES	42055	Edit > Line Operations > Remove Empty Lines
+IDM_EDIT_REMOVEEMPTYLINESWITHBLANK	42056	Edit > Line Operations > Remove Empty Lines (Containing Blank characters)
+IDM_EDIT_BLANKLINEABOVECURRENT	42057	Edit > Line Operations > Insert Blank Line Above Current
+IDM_EDIT_BLANKLINEBELOWCURRENT	42058	Edit > Line Operations > Insert Blank Line Below Current
+IDM_EDIT_SORTLINES_REVERSE_ORDER	42083	Edit > Line Operations > Reverse Line Order
+IDM_EDIT_SORTLINES_RANDOMLY	42078	Edit > Line Operations > Randomize Line Order
+IDM_EDIT_SORTLINES_LEXICOGRAPHIC_ASCENDING	42059	Edit > Line Operations > Sort Lines Lexicographically Ascending
+IDM_EDIT_SORTLINES_LEXICO_CASE_INSENS_ASCENDING	42080	Edit > Line Operations > Sort Lines Lex. Ascending Ignoring Case
+IDM_EDIT_SORTLINES_LOCALE_ASCENDING	42100	Edit > Line Operations > Sort Lines In Locale Order Ascending
+IDM_EDIT_SORTLINES_INTEGER_ASCENDING	42061	Edit > Line Operations > Sort Lines As Integers Ascending
+IDM_EDIT_SORTLINES_DECIMALCOMMA_ASCENDING	42063	Edit > Line Operations > Sort Lines As Decimals (Comma) Ascending
+IDM_EDIT_SORTLINES_DECIMALDOT_ASCENDING	42065	Edit > Line Operations > Sort Lines As Decimals (Dot) Ascending
+IDM_EDIT_SORTLINES_LENGTH_ASCENDING	42104	Edit > Line Operations > Sort Lines By Length Ascending
+IDM_EDIT_SORTLINES_LEXICOGRAPHIC_DESCENDING	42060	Edit > Line Operations > Sort Lines Lexicographically Descending
+IDM_EDIT_SORTLINES_LEXICO_CASE_INSENS_DESCENDING	42081	Edit > Line Operations > Sort Lines Lex. Descending Ignoring Case
+IDM_EDIT_SORTLINES_LOCALE_DESCENDING	42101	Edit > Line Operations > Sort Lines In Locale Order Descending
+IDM_EDIT_SORTLINES_INTEGER_DESCENDING	42062	Edit > Line Operations > Sort Lines As Integers Descending
+IDM_EDIT_SORTLINES_DECIMALCOMMA_DESCENDING	42064	Edit > Line Operations > Sort Lines As Decimals (Comma) Descending
+IDM_EDIT_SORTLINES_DECIMALDOT_DESCENDING	42066	Edit > Line Operations > Sort Lines As Decimals (Dot) Descending
+IDM_EDIT_SORTLINES_LENGTH_DESCENDING	42105	Edit > Line Operations > Sort Lines By Length Descending
+IDM_EDIT_BLOCK_COMMENT	42022	Edit > Comment/Uncomment > Toggle Single Line Comment
+IDM_EDIT_BLOCK_COMMENT_SET	42035	Edit > Comment/Uncomment > Single Line Comment
+IDM_EDIT_BLOCK_UNCOMMENT	42036	Edit > Comment/Uncomment > Single Line Uncomment
+IDM_EDIT_STREAM_COMMENT	42023	Edit > Comment/Uncomment > Block Comment
+IDM_EDIT_STREAM_UNCOMMENT	42047	Edit > Comment/Uncomment > Block Uncomment
+IDM_EDIT_AUTOCOMPLETE	50000	Edit > Auto-Completion > Function Completion
+IDM_EDIT_AUTOCOMPLETE_CURRENTFILE	50001	Edit > Auto-Completion > Word Completion
+IDM_EDIT_FUNCCALLTIP	50002	Edit > Auto-Completion > Function Parameters Hint
+IDM_EDIT_FUNCCALLTIP_PREVIOUS	50010	Edit > Auto-Completion > Function Parameters Previous Hint
+IDM_EDIT_FUNCCALLTIP_NEXT	50011	Edit > Auto-Completion > Function Parameters Next Hint
+IDM_EDIT_AUTOCOMPLETE_PATH	50006	Edit > Auto-Completion > Path Completion
+IDM_FORMAT_TODOS	45001	Edit > EOL Conversion > Windows (CR LF)
+IDM_FORMAT_TOUNIX	45002	Edit > EOL Conversion > Unix (LF)
+IDM_FORMAT_TOMAC	45003	Edit > EOL Conversion > Macintosh (CR)
+IDM_EDIT_TRIMTRAILING	42024	Edit > Blank Operations > Trim Trailing Space
+IDM_EDIT_TRIMLINEHEAD	42042	Edit > Blank Operations > Trim Leading Space
+IDM_EDIT_TRIM_BOTH	42043	Edit > Blank Operations > Trim Leading and Trailing Space
+IDM_EDIT_EOL2WS	42044	Edit > Blank Operations > EOL to Space
+IDM_EDIT_TRIMALL	42045	Edit > Blank Operations > Trim both and EOL to Space
+IDM_EDIT_TAB2SW	42046	Edit > Blank Operations > TAB to Space
+IDM_EDIT_SW2TAB_ALL	42054	Edit > Blank Operations > Space to TAB (All)
+IDM_EDIT_SW2TAB_LEADING	42053	Edit > Blank Operations > Space to TAB (Leading)
+IDM_EDIT_PASTE_AS_HTML	42038	Edit > Paste Special > Paste HTML Content
+IDM_EDIT_PASTE_AS_RTF	42039	Edit > Paste Special > Paste RTF Content
+IDM_EDIT_COPY_BINARY	42048	Edit > Paste Special > Copy Binary Content
+IDM_EDIT_CUT_BINARY	42049	Edit > Paste Special > Cut Binary Content
+IDM_EDIT_PASTE_BINARY	42050	Edit > Paste Special > Paste Binary Content
+IDM_EDIT_OPENSELECTEDFILETOEDIT	42073	Edit > On Selection > Open File
+IDM_EDIT_OPENSELECTEDFILEFOLDERINEXPLORER	42074	Edit > On Selection > Open Containing Folder in Explorer
+IDM_EDIT_REDACT_SELECTION	42106	Edit > On Selection > Redact Selection █ (Shift: ●)
+IDM_EDIT_SEARCHONINTERNET	42075	Edit > On Selection > Search on Internet
+IDM_EDIT_CHANGESEARCHENGINE	42076	Edit > On Selection > Change Search Engine...
+IDM_EDIT_MULTISELECTALL	42090	Edit > Multi-select All > Ignore Case & Whole Word
+IDM_EDIT_MULTISELECTALLMATCHCASE	42091	Edit > Multi-select All > Match Case Only
+IDM_EDIT_MULTISELECTALLWHOLEWORD	42092	Edit > Multi-select All > Match Whole Word Only
+IDM_EDIT_MULTISELECTALLMATCHCASEWHOLEWORD	42093	Edit > Multi-select All > Match Case & Whole Word
+IDM_EDIT_MULTISELECTNEXT	42094	Edit > Multi-select Next > Ignore Case & Whole Word
+IDM_EDIT_MULTISELECTNEXTMATCHCASE	42095	Edit > Multi-select Next > Match Case Only
+IDM_EDIT_MULTISELECTNEXTWHOLEWORD	42096	Edit > Multi-select Next > Match Whole Word Only
+IDM_EDIT_MULTISELECTNEXTMATCHCASEWHOLEWORD	42097	Edit > Multi-select Next > Match Case & Whole Word
+IDM_EDIT_MULTISELECTUNDO	42098	Edit > Undo the Latest Added Multi-Select
+IDM_EDIT_MULTISELECTSSKIP	42099	Edit > Skip Current & Go to Next Multi-select
+IDM_EDIT_COLUMNMODETIP	42037	Edit > Column Mode...
+IDM_EDIT_COLUMNMODE	42034	Edit > Column Editor...
+IDM_EDIT_CHAR_PANEL	42051	Edit > Character Panel
+IDM_EDIT_CLIPBOARDHISTORY_PANEL	42052	Edit > Clipboard History
+IDM_EDIT_TOGGLEREADONLY	42028	Edit > Read-Only in Notepad++ > Read-Only on Current Document
+IDM_EDIT_SETREADONLYFORALLDOCS	42102	Edit > Read-Only in Notepad++ > Read-Only for All Documents
+IDM_EDIT_CLEARREADONLYFORALLDOCS	42103	Edit > Read-Only in Notepad++ > Clear Read-Only for All Documents
+IDM_EDIT_TOGGLESYSTEMREADONLY	42033	Edit > Read-Only Attribute in Windows
+IDM_SEARCH_FIND	43001	Search > Find...
+IDM_SEARCH_FINDINFILES	43013	Search > Find in Files...
+IDM_SEARCH_FINDNEXT	43002	Search > Find Next
+IDM_SEARCH_FINDPREV	43010	Search > Find Previous
+IDM_SEARCH_SETANDFINDNEXT	43048	Search > Select and Find Next
+IDM_SEARCH_SETANDFINDPREV	43049	Search > Select and Find Previous
+IDM_SEARCH_VOLATILE_FINDNEXT	43014	Search > Find (Volatile) Next
+IDM_SEARCH_VOLATILE_FINDPREV	43015	Search > Find (Volatile) Previous
+IDM_SEARCH_REPLACE	43003	Search > Replace...
+IDM_SEARCH_FINDINCREMENT	43011	Search > Incremental Search
+IDM_FOCUS_ON_FOUND_RESULTS	43045	Search > Search Results Window
+IDM_SEARCH_GOTONEXTFOUND	43046	Search > Next Search Result
+IDM_SEARCH_GOTOPREVFOUND	43047	Search > Previous Search Result
+IDM_SEARCH_GOTOLINE	43004	Search > Go to...
+IDM_SEARCH_GOTOMATCHINGBRACE	43009	Search > Go to Matching Brace
+IDM_SEARCH_SELECTMATCHINGBRACES	43053	Search > Select All In-between {} [] or ()
+IDM_SEARCH_MARK	43054	Search > Mark...
+IDM_SEARCH_CHANGED_NEXT	43067	Search > Change History > Go to Next Change
+IDM_SEARCH_CHANGED_PREV	43068	Search > Change History > Go to Previous Change
+IDM_SEARCH_CLEAR_CHANGE_HISTORY	43069	Search > Change History > Clear Change History
+IDM_SEARCH_MARKALLEXT1	43022	Search > Style All Occurrences of Token > Using 1st Style
+IDM_SEARCH_MARKALLEXT2	43024	Search > Style All Occurrences of Token > Using 2nd Style
+IDM_SEARCH_MARKALLEXT3	43026	Search > Style All Occurrences of Token > Using 3rd Style
+IDM_SEARCH_MARKALLEXT4	43028	Search > Style All Occurrences of Token > Using 4th Style
+IDM_SEARCH_MARKALLEXT5	43030	Search > Style All Occurrences of Token > Using 5th Style
+IDM_SEARCH_MARKONEEXT1	43062	Search > Style One Token > Using 1st Style
+IDM_SEARCH_MARKONEEXT2	43063	Search > Style One Token > Using 2nd Style
+IDM_SEARCH_MARKONEEXT3	43064	Search > Style One Token > Using 3rd Style
+IDM_SEARCH_MARKONEEXT4	43065	Search > Style One Token > Using 4th Style
+IDM_SEARCH_MARKONEEXT5	43066	Search > Style One Token > Using 5th Style
+IDM_SEARCH_UNMARKALLEXT1	43023	Search > Clear Style > Clear 1st Style
+IDM_SEARCH_UNMARKALLEXT2	43025	Search > Clear Style > Clear 2nd Style
+IDM_SEARCH_UNMARKALLEXT3	43027	Search > Clear Style > Clear 3rd Style
+IDM_SEARCH_UNMARKALLEXT4	43029	Search > Clear Style > Clear 4th Style
+IDM_SEARCH_UNMARKALLEXT5	43031	Search > Clear Style > Clear 5th Style
+IDM_SEARCH_CLEARALLMARKS	43032	Search > Clear Style > Clear all Styles
+IDM_SEARCH_GOPREVMARKER1	43033	Search > Jump Up > 1st Style
+IDM_SEARCH_GOPREVMARKER2	43034	Search > Jump Up > 2nd Style
+IDM_SEARCH_GOPREVMARKER3	43035	Search > Jump Up > 3rd Style
+IDM_SEARCH_GOPREVMARKER4	43036	Search > Jump Up > 4th Style
+IDM_SEARCH_GOPREVMARKER5	43037	Search > Jump Up > 5th Style
+IDM_SEARCH_GOPREVMARKER_DEF	43038	Search > Jump Up > Find Mark Style
+IDM_SEARCH_GONEXTMARKER1	43039	Search > Jump Down > 1st Style
+IDM_SEARCH_GONEXTMARKER2	43040	Search > Jump Down > 2nd Style
+IDM_SEARCH_GONEXTMARKER3	43041	Search > Jump Down > 3rd Style
+IDM_SEARCH_GONEXTMARKER4	43042	Search > Jump Down > 4th Style
+IDM_SEARCH_GONEXTMARKER5	43043	Search > Jump Down > 5th Style
+IDM_SEARCH_GONEXTMARKER_DEF	43044	Search > Jump Down > Find Mark Style
+IDM_SEARCH_STYLE1TOCLIP	43055	Search > Copy Styled Text > 1st Style
+IDM_SEARCH_STYLE2TOCLIP	43056	Search > Copy Styled Text > 2nd Style
+IDM_SEARCH_STYLE3TOCLIP	43057	Search > Copy Styled Text > 3rd Style
+IDM_SEARCH_STYLE4TOCLIP	43058	Search > Copy Styled Text > 4th Style
+IDM_SEARCH_STYLE5TOCLIP	43059	Search > Copy Styled Text > 5th Style
+IDM_SEARCH_ALLSTYLESTOCLIP	43060	Search > Copy Styled Text > All Styles
+IDM_SEARCH_MARKEDTOCLIP	43061	Search > Copy Styled Text > Find Mark Style
+IDM_SEARCH_TOGGLE_BOOKMARK	43005	Search > Bookmark > Toggle Bookmark
+IDM_SEARCH_NEXT_BOOKMARK	43006	Search > Bookmark > Next Bookmark
+IDM_SEARCH_PREV_BOOKMARK	43007	Search > Bookmark > Previous Bookmark
+IDM_SEARCH_CLEAR_BOOKMARKS	43008	Search > Bookmark > Clear All Bookmarks
+IDM_SEARCH_CUTMARKEDLINES	43018	Search > Bookmark > Cut Bookmarked Lines
+IDM_SEARCH_COPYMARKEDLINES	43019	Search > Bookmark > Copy Bookmarked Lines
+IDM_SEARCH_PASTEMARKEDLINES	43020	Search > Bookmark > Paste to (Replace) Bookmarked Lines
+IDM_SEARCH_DELETEMARKEDLINES	43021	Search > Bookmark > Remove Bookmarked Lines
+IDM_SEARCH_DELETEUNMARKEDLINES	43051	Search > Bookmark > Remove Non-Bookmarked Lines
+IDM_SEARCH_INVERSEMARKS	43050	Search > Bookmark > Inverse Bookmarks
+IDM_SEARCH_FINDCHARINRANGE	43052	Search > Find characters in range...
+IDM_VIEW_ALWAYSONTOP	44034	View > Always on Top
+IDM_VIEW_FULLSCREENTOGGLE	44032	View > Toggle Full Screen Mode
+IDM_VIEW_POSTIT	44009	View > Post-It
+IDM_VIEW_DISTRACTIONFREE	44011	View > Distraction Free Mode
+IDM_VIEW_IN_FIREFOX	44100	View > View Current File in > Firefox
+IDM_VIEW_IN_CHROME	44101	View > View Current File in > Chrome
+IDM_VIEW_IN_EDGE	44102	View > View Current File in > Edge
+IDM_VIEW_IN_IE	44103	View > View Current File in > IE
+IDM_VIEW_TAB_SPACE	44025	View > Show Symbol > Show Space and Tab
+IDM_VIEW_EOL	44026	View > Show Symbol > Show End of Line
+IDM_VIEW_NPC	44130	View > Show Symbol > Show Non-Printing Characters
+IDM_VIEW_NPC_CCUNIEOL	44131	View > Show Symbol > Show Control Characters & Unicode EOL
+IDM_VIEW_ALL_CHARACTERS	44019	View > Show Symbol > Show All Characters
+IDM_VIEW_INDENT_GUIDE	44020	View > Show Symbol > Show Indent Guide
+IDM_VIEW_WRAP_SYMBOL	44041	View > Show Symbol > Show Wrap Symbol
+IDM_VIEW_ZOOMIN	44023	View > Zoom > Zoom In (Ctrl+Mouse Wheel Up)
+IDM_VIEW_ZOOMOUT	44024	View > Zoom > Zoom Out (Ctrl+Mouse Wheel Down)
+IDM_VIEW_ZOOMRESTORE	44033	View > Zoom > Restore Default Zoom
+IDM_VIEW_ZOOM_SYNC	44027	View > Zoom > Synchronize Across Views
+IDM_VIEW_GOTO_ANOTHER_VIEW	10001	View > Move/Clone Current Document > Move to Other View
+IDM_VIEW_CLONE_TO_ANOTHER_VIEW	10002	View > Move/Clone Current Document > Clone to Other View
+IDM_VIEW_GOTO_NEW_INSTANCE	10003	View > Move/Clone Current Document > Move to New Instance
+IDM_VIEW_LOAD_IN_NEW_INSTANCE	10004	View > Move/Clone Current Document > Open in New Instance
+IDM_VIEW_TAB1	44086	View > Tab > 1st Tab
+IDM_VIEW_TAB2	44087	View > Tab > 2nd Tab
+IDM_VIEW_TAB3	44088	View > Tab > 3rd Tab
+IDM_VIEW_TAB4	44089	View > Tab > 4th Tab
+IDM_VIEW_TAB5	44090	View > Tab > 5th Tab
+IDM_VIEW_TAB6	44091	View > Tab > 6th Tab
+IDM_VIEW_TAB7	44092	View > Tab > 7th Tab
+IDM_VIEW_TAB8	44093	View > Tab > 8th Tab
+IDM_VIEW_TAB9	44094	View > Tab > 9th Tab
+IDM_VIEW_TAB_START	44116	View > Tab > First Tab
+IDM_VIEW_TAB_END	44117	View > Tab > Last Tab
+IDM_VIEW_TAB_NEXT	44095	View > Tab > Next Tab
+IDM_VIEW_TAB_PREV	44096	View > Tab > Previous Tab
+IDM_VIEW_GOTO_START	10005	View > Tab > Move to Start
+IDM_VIEW_GOTO_END	10006	View > Tab > Move to End
+IDM_VIEW_TAB_MOVEFORWARD	44098	View > Tab > Move Tab Forward
+IDM_VIEW_TAB_MOVEBACKWARD	44099	View > Tab > Move Tab Backward
+IDM_VIEW_TAB_COLOUR_1	44111	View > Tab > Apply Color 1
+IDM_VIEW_TAB_COLOUR_2	44112	View > Tab > Apply Color 2
+IDM_VIEW_TAB_COLOUR_3	44113	View > Tab > Apply Color 3
+IDM_VIEW_TAB_COLOUR_4	44114	View > Tab > Apply Color 4
+IDM_VIEW_TAB_COLOUR_5	44115	View > Tab > Apply Color 5
+IDM_VIEW_TAB_COLOUR_NONE	44110	View > Tab > Remove Color
+IDM_VIEW_WRAP	44022	View > Word wrap
+IDM_VIEW_SWITCHTO_OTHER_VIEW	44072	View > Focus on Another View
+IDM_VIEW_HIDELINES	44042	View > Hide Lines
+IDM_VIEW_FOLDALL	44010	View > Fold All
+IDM_VIEW_UNFOLDALL	44029	View > Unfold All
+IDM_VIEW_FOLD_CURRENT	44030	View > Fold Current Level
+IDM_VIEW_UNFOLD_CURRENT	44031	View > Unfold Current Level
+IDM_VIEW_FOLD_1	44051	View > Fold Level > 1
+IDM_VIEW_FOLD_2	44052	View > Fold Level > 2
+IDM_VIEW_FOLD_3	44053	View > Fold Level > 3
+IDM_VIEW_FOLD_4	44054	View > Fold Level > 4
+IDM_VIEW_FOLD_5	44055	View > Fold Level > 5
+IDM_VIEW_FOLD_6	44056	View > Fold Level > 6
+IDM_VIEW_FOLD_7	44057	View > Fold Level > 7
+IDM_VIEW_FOLD_8	44058	View > Fold Level > 8
+IDM_VIEW_UNFOLD_1	44061	View > Unfold Level > 1
+IDM_VIEW_UNFOLD_2	44062	View > Unfold Level > 2
+IDM_VIEW_UNFOLD_3	44063	View > Unfold Level > 3
+IDM_VIEW_UNFOLD_4	44064	View > Unfold Level > 4
+IDM_VIEW_UNFOLD_5	44065	View > Unfold Level > 5
+IDM_VIEW_UNFOLD_6	44066	View > Unfold Level > 6
+IDM_VIEW_UNFOLD_7	44067	View > Unfold Level > 7
+IDM_VIEW_UNFOLD_8	44068	View > Unfold Level > 8
+IDM_VIEW_SUMMARY	44049	View > Summary...
+IDM_VIEW_PROJECT_PANEL_1	44081	View > Project Panels > Project Panel 1
+IDM_VIEW_PROJECT_PANEL_2	44082	View > Project Panels > Project Panel 2
+IDM_VIEW_PROJECT_PANEL_3	44083	View > Project Panels > Project Panel 3
+IDM_VIEW_FILEBROWSER	44085	View > Folder as Workspace
+IDM_VIEW_DOC_MAP	44080	View > Document Map
+IDM_VIEW_DOCLIST	44070	View > Document List
+IDM_VIEW_FUNC_LIST	44084	View > Function List
+IDM_VIEW_SYNSCROLLV	44035	View > Synchronize Vertical Scrolling
+IDM_VIEW_SYNSCROLLH	44036	View > Synchronize Horizontal Scrolling
+IDM_EDIT_RTL	42026	View > Text Direction RTL
+IDM_EDIT_LTR	42027	View > Text Direction LTR
+IDM_VIEW_MONITORING	44097	View > Monitoring (tail -f)
+IDM_FORMAT_ANSI	45004	Encoding > ANSI
+IDM_FORMAT_AS_UTF_8	45008	Encoding > UTF-8
+IDM_FORMAT_UTF_8	45005	Encoding > UTF-8-BOM
+IDM_FORMAT_UTF_16BE	45006	Encoding > UTF-16 BE BOM
+IDM_FORMAT_UTF_16LE	45007	Encoding > UTF-16 LE BOM
+IDM_FORMAT_ISO_8859_6	45034	Encoding > Character sets > Arabic > ISO 8859-6
+IDM_FORMAT_DOS_720	45045	Encoding > Character sets > Arabic > OEM 720
+IDM_FORMAT_WIN_1256	45026	Encoding > Character sets > Arabic > Windows-1256
+IDM_FORMAT_ISO_8859_4	45032	Encoding > Character sets > Baltic > ISO 8859-4
+IDM_FORMAT_ISO_8859_13	45040	Encoding > Character sets > Baltic > ISO 8859-13
+IDM_FORMAT_DOS_775	45047	Encoding > Character sets > Baltic > OEM 775
+IDM_FORMAT_WIN_1257	45027	Encoding > Character sets > Baltic > Windows-1257
+IDM_FORMAT_ISO_8859_14	45041	Encoding > Character sets > Celtic > ISO 8859-14
+IDM_FORMAT_ISO_8859_5	45033	Encoding > Character sets > Cyrillic > ISO 8859-5
+IDM_FORMAT_KOI8R_CYRILLIC	45068	Encoding > Character sets > Cyrillic > KOI8-R
+IDM_FORMAT_KOI8U_CYRILLIC	45067	Encoding > Character sets > Cyrillic > KOI8-U
+IDM_FORMAT_MAC_CYRILLIC	45066	Encoding > Character sets > Cyrillic > Macintosh
+IDM_FORMAT_DOS_855	45050	Encoding > Character sets > Cyrillic > OEM 855
+IDM_FORMAT_DOS_866	45058	Encoding > Character sets > Cyrillic > OEM 866
+IDM_FORMAT_WIN_1251	45021	Encoding > Character sets > Cyrillic > Windows-1251
+IDM_FORMAT_DOS_852	45049	Encoding > Character sets > Central European > OEM 852
+IDM_FORMAT_WIN_1250	45020	Encoding > Character sets > Central European > Windows-1250
+IDM_FORMAT_BIG5	45060	Encoding > Character sets > Chinese > Big5 (Traditional)
+IDM_FORMAT_GB2312	45061	Encoding > Character sets > Chinese > GB2312 (Simplified)
+IDM_FORMAT_ISO_8859_2	45030	Encoding > Character sets > Eastern European > ISO 8859-2
+IDM_FORMAT_ISO_8859_7	45035	Encoding > Character sets > Greek > ISO 8859-7
+IDM_FORMAT_DOS_737	45046	Encoding > Character sets > Greek > OEM 737
+IDM_FORMAT_DOS_869	45059	Encoding > Character sets > Greek > OEM 869
+IDM_FORMAT_WIN_1253	45023	Encoding > Character sets > Greek > Windows-1253
+IDM_FORMAT_ISO_8859_8	45036	Encoding > Character sets > Hebrew > ISO 8859-8
+IDM_FORMAT_DOS_862	45055	Encoding > Character sets > Hebrew > OEM 862
+IDM_FORMAT_WIN_1255	45025	Encoding > Character sets > Hebrew > Windows-1255
+IDM_FORMAT_SHIFT_JIS	45062	Encoding > Character sets > Japanese > Shift-JIS
+IDM_FORMAT_KOREAN_WIN	45063	Encoding > Character sets > Korean > Windows 949
+IDM_FORMAT_EUC_KR	45064	Encoding > Character sets > Korean > EUC-KR
+IDM_FORMAT_DOS_861	45054	Encoding > Character sets > North European > OEM 861 : Icelandic
+IDM_FORMAT_DOS_865	45057	Encoding > Character sets > North European > OEM 865 : Nordic
+IDM_FORMAT_TIS_620	45065	Encoding > Character sets > Thai > TIS-620
+IDM_FORMAT_ISO_8859_3	45031	Encoding > Character sets > Turkish > ISO 8859-3
+IDM_FORMAT_ISO_8859_9	45037	Encoding > Character sets > Turkish > ISO 8859-9
+IDM_FORMAT_DOS_857	45051	Encoding > Character sets > Turkish > OEM 857
+IDM_FORMAT_WIN_1254	45024	Encoding > Character sets > Turkish > Windows-1254
+IDM_FORMAT_ISO_8859_1	45029	Encoding > Character sets > Western European > ISO 8859-1
+IDM_FORMAT_ISO_8859_15	45042	Encoding > Character sets > Western European > ISO 8859-15
+IDM_FORMAT_DOS_850	45048	Encoding > Character sets > Western European > OEM 850
+IDM_FORMAT_DOS_858	45052	Encoding > Character sets > Western European > OEM 858
+IDM_FORMAT_DOS_860	45053	Encoding > Character sets > Western European > OEM 860 : Portuguese
+IDM_FORMAT_DOS_863	45056	Encoding > Character sets > Western European > OEM 863 : French
+IDM_FORMAT_DOS_437	45044	Encoding > Character sets > Western European > OEM-US : CP437
+IDM_FORMAT_WIN_1252	45022	Encoding > Character sets > Western European > Windows-1252
+IDM_FORMAT_WIN_1258	45028	Encoding > Character sets > Vietnamese > Windows-1258
+IDM_FORMAT_CONV2_ANSI	45009	Encoding > Convert to ANSI
+IDM_FORMAT_CONV2_AS_UTF_8	45010	Encoding > Convert to UTF-8
+IDM_FORMAT_CONV2_UTF_8	45011	Encoding > Convert to UTF-8-BOM
+IDM_FORMAT_CONV2_UTF_16BE	45012	Encoding > Convert to UTF-16 BE BOM
+IDM_FORMAT_CONV2_UTF_16LE	45013	Encoding > Convert to UTF-16 LE BOM
+IDM_LANG_TEXT	46016	Language > None (Normal Text)
+IDM_LANG_FLASH	46028	Language > ActionScript
+IDM_LANG_ADA	46042	Language > Ada
+IDM_LANG_ASN1	46064	Language > ASN.1
+IDM_LANG_ASP	46009	Language > ASP
+IDM_LANG_ASM	46033	Language > Assembly
+IDM_LANG_AU3	46044	Language > AutoIt
+IDM_LANG_AVS	46065	Language > AviSynth
+IDM_LANG_BAANC	46059	Language > BaanC
+IDM_LANG_BATCH	46022	Language > Batch
+IDM_LANG_BLITZBASIC	46066	Language > Blitzbasic
+IDM_LANG_C	46002	Language > C
+IDM_LANG_CS	46023	Language > C#
+IDM_LANG_CPP	46003	Language > C++
+IDM_LANG_CAML	46040	Language > Caml
+IDM_LANG_CMAKE	46048	Language > CMake
+IDM_LANG_COBOL	46050	Language > COBOL
+IDM_LANG_CSOUND	46069	Language > CSound
+IDM_LANG_COFFEESCRIPT	46056	Language > CoffeeScript
+IDM_LANG_CSS	46010	Language > CSS
+IDM_LANG_D	46051	Language > D
+IDM_LANG_DIFF	46034	Language > Diff
+IDM_LANG_ERLANG	46070	Language > Erlang
+IDM_LANG_ERRORLIST	46093	Language > ErrorList
+IDM_LANG_ESCSEQ	46094	Language > Escape Sequence (ANSI)
+IDM_LANG_ESCRIPT	46071	Language > ESCRIPT
+IDM_LANG_FORTH	46072	Language > Forth
+IDM_LANG_FORTRAN	46026	Language > Fortran (free form)
+IDM_LANG_FORTRAN_77	46058	Language > Fortran (fixed form)
+IDM_LANG_FREEBASIC	46068	Language > Freebasic
+IDM_LANG_GDSCRIPT	46087	Language > GDScript
+IDM_LANG_GOLANG	46089	Language > Go
+IDM_LANG_GUI4CLI	46052	Language > Gui4Cli
+IDM_LANG_HASKELL	46046	Language > Haskell
+IDM_LANG_HOLLYWOOD	46088	Language > Hollywood
+IDM_LANG_HTML	46005	Language > HTML
+IDM_LANG_INI	46019	Language > INI file
+IDM_LANG_INNO	46047	Language > Inno Setup
+IDM_LANG_IHEX	46061	Language > Intel HEX
+IDM_LANG_JAVA	46004	Language > Java
+IDM_LANG_JS	46007	Language > JavaScript
+IDM_LANG_JSON	46057	Language > JSON
+IDM_LANG_JSON5	46085	Language > JSON5
+IDM_LANG_JSP	46055	Language > JSP
+IDM_LANG_KIX	46041	Language > KIXtart
+IDM_LANG_LISP	46031	Language > LISP
+IDM_LANG_LATEX	46073	Language > LaTeX
+IDM_LANG_LUA	46024	Language > Lua
+IDM_LANG_MAKEFILE	46018	Language > Makefile
+IDM_LANG_MATLAB	46045	Language > Matlab
+IDM_LANG_MSSQL	46086	Language > Microsoft Transact-SQL
+IDM_LANG_MMIXAL	46074	Language > MMIXAL
+IDM_LANG_ASCII	46015	Language > MS-DOS Style
+IDM_LANG_NIM	46075	Language > Nim
+IDM_LANG_NNCRONTAB	46076	Language > Nncrontab
+IDM_LANG_NSIS	46029	Language > NSIS
+IDM_LANG_OBJC	46014	Language > Objective-C
+IDM_LANG_OSCRIPT	46077	Language > OScript
+IDM_LANG_PASCAL	46011	Language > Pascal
+IDM_LANG_PERL	46013	Language > Perl
+IDM_LANG_PHP	46008	Language > PHP
+IDM_LANG_PS	46036	Language > PostScript
+IDM_LANG_POWERSHELL	46053	Language > PowerShell
+IDM_LANG_PROPS	46035	Language > Properties
+IDM_LANG_PUREBASIC	46067	Language > Purebasic
+IDM_LANG_PYTHON	46012	Language > Python
+IDM_LANG_R	46054	Language > R
+IDM_LANG_RAKU	46090	Language > Raku
+IDM_LANG_REBOL	46078	Language > REBOL
+IDM_LANG_REGISTRY	46079	Language > Registry
+IDM_LANG_RC	46017	Language > Resource file
+IDM_LANG_RUBY	46037	Language > Ruby
+IDM_LANG_RUST	46080	Language > Rust
+IDM_LANG_SAS	46092	Language > SAS
+IDM_LANG_BASH	46027	Language > Shell
+IDM_LANG_SCHEME	46032	Language > Scheme
+IDM_LANG_SMALLTALK	46038	Language > Smalltalk
+IDM_LANG_SPICE	46081	Language > Spice
+IDM_LANG_SQL	46020	Language > SQL
+IDM_LANG_STTXT	46095	Language > Structured Text
+IDM_LANG_SWIFT	46063	Language > Swift
+IDM_LANG_SREC	46060	Language > S-Record
+IDM_LANG_TCL	46030	Language > TCL
+IDM_LANG_TEHEX	46062	Language > Tektronix extended HEX
+IDM_LANG_TEX	46025	Language > TeX
+IDM_LANG_TOML	46091	Language > TOML
+IDM_LANG_TXT2TAGS	46082	Language > txt2tags
+IDM_LANG_TYPESCRIPT	46084	Language > TypeScript
+IDM_LANG_VERILOG	46043	Language > Verilog
+IDM_LANG_VHDL	46039	Language > VHDL
+IDM_LANG_VB	46021	Language > Visual Basic
+IDM_LANG_VISUALPROLOG	46083	Language > Visual Prolog
+IDM_LANG_XML	46006	Language > XML
+IDM_LANG_YAML	46049	Language > YAML
+IDM_LANG_USER_DLG	46250	Language > Define your language...
+IDM_LANG_OPENUDLDIR	46300	Language > Open User Defined Language folder...
+IDM_LANG_UDLCOLLECTION_PROJECT_SITE	46301	Language > Notepad++ User Defined Languages Collection
+IDM_LANG_USER	46180	Language > User-Defined
+IDM_SETTING_PREFERENCE	48011	Settings > Preferences...
+IDM_LANGSTYLE_CONFIG_DLG	46001	Settings > Style Configurator...
+IDM_SETTING_SHORTCUT_MAPPER	48009	Settings > Shortcut Mapper...
+IDM_SETTING_IMPORTPLUGIN	48005	Settings > Import > Import plugin(s)...
+IDM_SETTING_IMPORTSTYLETHEMES	48006	Settings > Import > Import style theme(s)...
+IDM_SETTING_EDITCONTEXTMENU	48018	Settings > Edit Popup ContextMenu
+IDM_TOOL_MD5_GENERATE	48501	Tools > MD5 > Generate...
+IDM_TOOL_MD5_GENERATEFROMFILE	48502	Tools > MD5 > Generate from files...
+IDM_TOOL_MD5_GENERATEINTOCLIPBOARD	48503	Tools > MD5 > Generate from selection into clipboard
+IDM_TOOL_SHA1_GENERATE	48507	Tools > SHA-1 > Generate...
+IDM_TOOL_SHA1_GENERATEFROMFILE	48508	Tools > SHA-1 > Generate from files...
+IDM_TOOL_SHA1_GENERATEINTOCLIPBOARD	48509	Tools > SHA-1 > Generate from selection into clipboard
+IDM_TOOL_SHA256_GENERATE	48504	Tools > SHA-256 > Generate...
+IDM_TOOL_SHA256_GENERATEFROMFILE	48505	Tools > SHA-256 > Generate from files...
+IDM_TOOL_SHA256_GENERATEINTOCLIPBOARD	48506	Tools > SHA-256 > Generate from selection into clipboard
+IDM_TOOL_SHA512_GENERATE	48510	Tools > SHA-512 > Generate...
+IDM_TOOL_SHA512_GENERATEFROMFILE	48511	Tools > SHA-512 > Generate from files...
+IDM_TOOL_SHA512_GENERATEINTOCLIPBOARD	48512	Tools > SHA-512 > Generate from selection into clipboard
+IDM_MACRO_STARTRECORDINGMACRO	42018	Macro > Start Recording
+IDM_MACRO_STOPRECORDINGMACRO	42019	Macro > Stop Recording
+IDM_MACRO_PLAYBACKRECORDEDMACRO	42021	Macro > Playback
+IDM_MACRO_SAVECURRENTMACRO	42025	Macro > Save Current Recorded Macro...
+IDM_MACRO_RUNMULTIMACRODLG	42032	Macro > Run a Macro Multiple Times...
+IDM_EXECUTE	49000	Run > Run...
+IDM_EXECUTE_VALIDATE_SHORTCUTSXML	49001	Run > Validate shortcuts.xml
+IDM_SETTING_OPENPLUGINSDIR	48014	Plugins > Open Plugins Folder...
+IDM_WINDOW_SORT_FN_ASC	11002	Window > Sort By > Name A to Z
+IDM_WINDOW_SORT_FN_DSC	11003	Window > Sort By > Name Z to A
+IDM_WINDOW_SORT_FP_ASC	11004	Window > Sort By > Path A to Z
+IDM_WINDOW_SORT_FP_DSC	11005	Window > Sort By > Path Z to A
+IDM_WINDOW_SORT_FT_ASC	11006	Window > Sort By > Type A to Z
+IDM_WINDOW_SORT_FT_DSC	11007	Window > Sort By > Type Z to A
+IDM_WINDOW_SORT_FS_ASC	11008	Window > Sort By > Content Length Ascending
+IDM_WINDOW_SORT_FS_DSC	11009	Window > Sort By > Content Length Descending
+IDM_WINDOW_SORT_FD_ASC	11010	Window > Sort By > Modified Time Ascending
+IDM_WINDOW_SORT_FD_DSC	11011	Window > Sort By > Modified Time Descending
+IDM_WINDOW_WINDOWS	11001	Window > Windows...
+IDM_WINDOW_MRU_FIRST	11020	Window > Recent Window
+IDM_CMDLINEARGUMENTS	47010	? > Command Line Arguments...
+IDM_HOMESWEETHOME	47001	? > Notepad++ Home
+IDM_PROJECTPAGE	47002	? > Notepad++ Project Page
+IDM_ONLINEDOCUMENT	47003	? > Notepad++ Online User Manual
+IDM_FORUM	47004	? > Notepad++ Community (Forum)
+IDM_UPDATE_NPP	47006	? > Update Notepad++
+IDM_CONFUPDATERPROXY	47009	? > Set Updater Proxy...
+IDM_DEBUGINFO	47012	? > Debug Info...
+IDM_ABOUT	47000	? > About Notepad++
+IDM_DROPLIST_LIST	14001	▼ > Recent Window

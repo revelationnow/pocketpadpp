@@ -23,6 +23,8 @@ import io.github.revelationnow.pocketpadpp.core.Hashes
 import io.github.revelationnow.pocketpadpp.core.HexBuffer
 import io.github.revelationnow.pocketpadpp.core.Invisibles
 import io.github.revelationnow.pocketpadpp.core.LanguageSetup
+import io.github.revelationnow.pocketpadpp.core.LuaEngine
+import io.github.revelationnow.pocketpadpp.core.NppCommands
 import io.github.revelationnow.pocketpadpp.core.MacroStep
 import io.github.revelationnow.pocketpadpp.core.Macros
 import io.github.revelationnow.pocketpadpp.core.Marks
@@ -1282,9 +1284,261 @@ private fun testHexBuffer() {
     eq("A.~.", listOf(0x41, 0x00, 0x7E, 0xFF).map { HexBuffer.shown(it) }.joinToString(""), "the text column shows printable ASCII and dots")
 }
 
+private fun testLua(assets: File) {
+    val files = File(assets.parentFile, "lua")
+    val printed = ArrayList<String>()
+    val asked = ArrayList<String>()
+    val main = HostSci()
+    val other = HostSci()
+    var split = true
+    var engine: LuaEngine? = null
+    engine = LuaEngine(
+        File(files, "prelude.lua").readText(),
+        mapOf("iface" to File(files, "iface.lua").readText(), "constants" to File(files, "constants.lua").readText()),
+    ) { name, args ->
+        when (name) {
+            "print" -> {
+                printed += (if (args[1] == true) "! " else "") + args[0]
+                null
+            }
+            "scripts" -> "/scripts"
+            "info" -> when (args[0]) {
+                "name" -> "notes.txt"
+                "count" -> 3L + (args.getOrNull(1) as? Long ?: 0L)
+                "version" -> 65538L
+                "langType" -> 23L
+                else -> null
+            }
+            "open" -> if (args[0] == "/bad") throw IllegalStateException("cannot open /bad") else true
+            "toast" -> {
+                // The application calling back into Lua while Lua is calling it.
+                engine!!.event("OnSave", "nested.txt", 9L)
+                null
+            }
+            else -> {
+                asked += name + args.joinToString(", ", "(", ")")
+                if (name == "command") true else null
+            }
+        }
+    }
+    engine.editors = { main.ptr to (if (split) other.ptr else 0L) }
+    eq(null, engine.start(), "the scripting layer loads")
+    fun run(code: String) = engine.run("test.lua", code)
+    // What a line typed in the console shows: its value, or the error.
+    fun value(code: String): String {
+        printed.clear()
+        return engine.eval(code) ?: printed.joinToString("\n")
+    }
+
+    // The console.
+    eq("3", value("1 + 2"), "an expression typed in the console shows its value")
+    eq("Lua 5.4", value("=_VERSION"), "with or without the old = in front")
+    eq("", value("x = 5"), "a statement shows nothing")
+    eq("10", value("x * 2"), "and what it set stays")
+    eq("1\t2\tnil", value("1, 2, nil"), "several values are separated by tabs")
+    ok(value("1 +").contains("console:1:"), "a line that is not Lua says so")
+    eq("nil", value("os.exit"), "a script cannot end the app")
+    eq("/scripts/?.lua;/scripts/?/init.lua", value("package.path"), "require looks in the scripts folder")
+
+    // Functions: text in, text out.
+    eq(null, run("editor:AddText('hello world')"), "a function with a text")
+    eq("hello world", main.text, "the text is in the editor")
+    eq("11", value("editor.Length"), "a property")
+    eq("hello world\t11", value("editor:GetText()"), "a function that returns text")
+    eq("0", value("#editor:GetSelText()"), "an empty text is an empty string, not nothing")
+    eq(null, run("editor:SetSel(0, 5)"), "two numbers")
+    eq("hello", value("(editor:GetSelText())"), "the selected text")
+    eq("hello world\t5", value("editor:GetCurLine()"), "the line of the caret, and where the caret is in it")
+    eq("hello world\t11", value("editor:GetLine(0)"), "a line by number")
+    eq("true", value("editor:CanUndo()"), "a function that answers yes or no")
+    eq(null, run("editor:AddText('a\\0b')"), "a text with a zero byte in it")
+    eq(14L, main.send(Sci.SCI_GETLENGTH), "goes in whole, all three bytes")
+    eq("true", value("editor:textrange(5, 8) == 'a\\0b'"), "and comes back whole")
+    main.text = "hello world"
+
+    // Properties.
+    eq("8", value("editor.TabWidth"), "a number property")
+    eq(null, run("editor.TabWidth = 3"), "setting it")
+    eq(3L, main.send(Sci.SCI_GETTABWIDTH), "reaches the editor")
+    eq(null, run("editor.ViewEOL = true"), "a yes/no property")
+    eq(1L, main.send(Sci.SCI_GETVIEWEOL), "is on")
+    eq(null, run("editor.ViewEOL = 0"), "0 turns it off, though Lua itself counts 0 as true")
+    eq(0L, main.send(Sci.SCI_GETVIEWEOL), "is off")
+    eq("false", value("editor.ReadOnly"), "reads as true or false")
+    eq(null, run("editor.StyleBold[5] = true"), "a property with an index")
+    eq(1L, main.send(Sci.SCI_STYLEGETBOLD, 5), "is set for that index")
+    eq("true\tfalse", value("editor.StyleBold[5], editor.StyleBold[6]"), "and read by index")
+    eq("11", value("editor.LineEndPosition[0]"), "a read-only one with an index")
+    eq(null, run("editor.StyleFont[7] = 'Mono'"), "a text property with an index")
+    eq("Mono", value("editor.StyleFont[7]"), "comes back as text")
+    main.setLexer("python")
+    eq(null, run("editor.Property['fold.compact'] = '1'"), "an index that is itself a text")
+    eq("1", value("editor.Property['fold.compact']"), "reads back")
+    eq("python", value("editor.LexerLanguage"), "a text property without an index")
+    eq(null, run("editor.MarginLeft = 9"), "a property whose value travels second")
+    eq(9L, main.send(Sci.SCI_GETMARGINLEFT), "arrives")
+    ok(run("editor.Length = 3")!!.contains("can only be read"), "a read-only property says so when set")
+    ok(run("editor.TabWidth[1] = 3") != null, "an index on a property that has none is an error")
+    eq(null, run("editor:SetTabWidth(5)"), "getters and setters are also there under their own names")
+    eq("5", value("editor:GetTabWidth()"), "as functions")
+    eq(null, run("editor:AssignCmdKey(string.byte('Q'), SCMOD_CTRL, SCI_SELECTALL)"), "a key with its modifiers")
+
+    // The helpers.
+    eq("hello", value("editor:textrange(0, 5)"), "textrange")
+    eq("6\t11", value("editor:findtext('world')"), "findtext")
+    eq("", value("editor:findtext('nope')"), "findtext finding nothing returns nothing")
+    eq("", value("editor:findtext('hello', 0, 3)"), "findtext from a position on")
+    eq(null, run("editor:insert(0, '> ') editor:append('!') editor:remove(2, 8)"), "insert, append and remove")
+    eq("> world!", main.text, "did what they say")
+    main.text = "a1 b22 c333"
+    eq(null, run("for m in editor:match('[0-9]+', SCFIND_REGEXP) do m:replace('#' .. m.len) end"), "match with replace")
+    eq("a#1 b#2 c#3", main.text, "every match was replaced, each seen once")
+    eq("1:#1 5:#2 9:#3 ", value("(function() local s = '' for m in editor:match('#%d', 0) do s = s end for m in editor:match('#[0-9]', SCFIND_REGEXP) do s = s .. m.pos .. ':' .. m.text .. ' ' end return s end)()"), "match gives positions and texts")
+
+    // Constants.
+    eq("2001\t7\t1\t42013", value("SCI_ADDTEXT, INDIC_ROUNDBOX, SCE_P_COMMENTLINE, IDM_EDIT_JOIN_LINES"), "constants by name")
+    eq("nil", value("NO_SUCH_CONSTANT"), "a name that is nothing is nil as always")
+    eq("SCI_ADDTEXT", value("npp.ConstantName(2001, 'SCI_')"), "and back from the number")
+    eq("11\t5", value("npp.SendEditor(SCI_GETLENGTH), npp:SendEditor(SCI_GETTABWIDTH)"), "SendEditor, with a dot or a colon")
+
+    // The second view.
+    eq(null, run("editor2:AddText('below') editor1:AppendText('.')"), "editor1 and editor2")
+    eq("below", other.text, "the second view's text")
+    split = false
+    ok(run("editor2:AddText('x')")!!.contains("no second view"), "without a split, editor2 says there is none")
+    split = true
+
+    // Mistakes are named, with the line.
+    val unknown = run("\neditor:NoSuchThing()")!!
+    ok(unknown.startsWith("test.lua:2:") && unknown.contains("'NoSuchThing'"), "an unknown function: $unknown")
+    ok(run("editor:GetDocPointer()")!!.contains("not available to scripts"), "pointers stay out of reach")
+    ok(run("editor:AddText({})")!!.contains("argument 1 must be a string"), "a wrong kind of argument")
+    ok(run("editor:GotoLine(1.5)")!!.contains("whole number"), "a fraction where a position goes")
+    ok(run("x = = 1")!!.startsWith("test.lua:1:"), "a syntax error")
+    eq("test.lua:1: boom", run("error('boom')"), "an error raised by the script")
+    ok(run("error({})") != null, "an error that is not a text")
+    ok(value("npp.HideMenu").contains("npp.HideMenu is not available"), "what the app does not have says so")
+    ok(engine.run("bytes", "\u001bLua")!!.contains("binary"), "compiled Lua is not accepted")
+
+    // The application.
+    eq("notes.txt\t3\t4", value("npp:GetFileName(), npp:GetNbOpenFiles(), npp.GetNbOpenFiles(1)"), "questions to the app")
+    eq("1.2", value("(npp.Version >> 16) .. '.' .. (npp.Version & 0xff)"), "a property of the app")
+    eq(null, run("npp:MenuCommand(IDM_EDIT_JOIN_LINES) npp.MenuCommand('View > Word wrap')"), "menu commands")
+    ok(asked.containsAll(listOf("command(42013)", "command(View > Word wrap)")), "by Notepad++'s id or by menu path: $asked")
+    eq("true\t22", value("npp.BufferLangType[7] == L_LUA, L_PYTHON"), "the language of a document, by Notepad++'s numbers")
+    eq(null, run("npp.BufferLangType[7] = L_PYTHON"), "and setting it")
+    ok(asked.contains("langType(7, 22)"), "asks the app: $asked")
+    ok(run("npp.LanguageName[1] = 'x'")!!.contains("can only be read"), "what can only be read says so")
+    ok(run("npp:DoOpen('/bad')")!!.contains("cannot open /bad"), "what the app refuses becomes an error in the script")
+    eq("false", value("(pcall(npp.DoOpen, '/bad'))"), "which the script can catch")
+    eq("true", value("npp:DoOpen('/good')"), "and what it answers is returned")
+
+    // Events.
+    asked.clear()
+    eq(null, run("function onSave(name, id) print('saved', name, id) end npp.AddEventHandler('OnSave', onSave)"), "an event handler")
+    eq(listOf("watch(OnSave, true)"), asked, "the app is told which events are wanted")
+    printed.clear()
+    eq(null, engine.event("OnSave", "a.txt", 7L), "the event")
+    eq(listOf("saved\ta.txt\t7"), printed, "reaches the handler with its arguments")
+    run("npp.AddEventHandler('OnSave', function() error('oops') end) npp.AddEventHandler('OnSave', function() print('third') end)")
+    printed.clear()
+    engine.event("OnSave", "b.txt", 8L)
+    ok(printed.size == 3 && printed[1].startsWith("! OnSave: ") && printed[1].endsWith("oops") && printed[2] == "third", "a handler that fails is reported and the others still run: $printed")
+    printed.clear()
+    eq(null, run("npp:Toast('x')"), "the app calling back while a script is running")
+    eq("saved\tnested.txt\t9", printed.firstOrNull(), "is served")
+    asked.clear()
+    eq("true\tfalse", value("npp.RemoveEventHandler('OnSave', onSave), npp.RemoveEventHandler('OnSave', onSave)"), "removing a handler")
+    run("npp.RemoveAllEventHandlers('OnSave')")
+    eq("watch(OnSave, false)", asked.lastOrNull(), "with the last one gone the app is told")
+    printed.clear()
+    engine.event("OnSave", "c.txt", 1L)
+    eq(emptyList<String>(), printed, "and nothing is called")
+    ok(run("npp.AddEventHandler('OnNothing', print)")!!.contains("unrecognized event name"), "an event that does not exist")
+    printed.clear()
+    eq(null, run("npp.AddEventHandler({'OnStyle', 'OnOpen'}, print) npp.AddEventHandler('OnStyle', print)"), "several events at once")
+    eq(1, printed.count { it.contains("does not send OnStyle") }, "an event this app never sends is accepted, with one note")
+
+    // Shortcuts and timers.
+    asked.clear()
+    main.text = "shout"
+    eq(null, run("npp.AddShortcut('Shout', 'Ctrl+Alt+U', function() editor:SelectAll() editor:UpperCase() end)"), "a command with a shortcut")
+    eq(listOf("shortcut(Shout, Ctrl+Alt+U)"), asked, "is announced to the app")
+    eq(null, engine.dispatch("shortcut", "Shout"), "and when the app runs it")
+    eq("SHOUT", main.text, "the function is called")
+    run("npp.AddShortcut('Broken', '', function() local x = nil; x.y = 1 end)")
+    ok(engine.dispatch("shortcut", "Broken")!!.contains("test.lua:1:"), "a command that fails gives the error back")
+    asked.clear()
+    eq(null, run("ticks = 0 timer = npp.StartTimer(100, function(t) ticks = ticks + 1 if ticks == 2 then npp.StopTimer(t) end end)"), "a timer")
+    eq(listOf("timer(1, 100)"), asked, "is asked of the app")
+    repeat(3) { engine.dispatch("timer", 1L) }
+    eq("2", value("ticks"), "it runs each time the app says so, until stopped")
+    ok(asked.contains("stopTimer(1)"), "and stopping it tells the app")
+
+    // Scripts that would never end, or would take all memory.
+    engine.setTimeLimit(300)
+    val started = System.nanoTime()
+    ok(run("while true do end")!!.contains("was stopped"), "an endless loop is stopped")
+    ok(run("while true do pcall(function() while true do end end) end")!!.contains("was stopped"), "also one that catches the error and carries on")
+    ok((System.nanoTime() - started) / 1_000_000 < 3000, "without much delay")
+    eq("2", value("1 + 1"), "and Lua works on afterwards")
+    engine.setTimeLimit(20000)
+    ok(run("local t = {} for i = 1, 1e9 do t[i] = string.rep('x', 4096) .. i end")!!.contains("not enough memory"), "a script that takes all the memory it can get is stopped")
+    eq("true", value("collectgarbage() == 0"), "and Lua works on after that too")
+
+    // With LUA_SCRIPTS set to a folder, each script in it is loaded too, to see how scripts from elsewhere fare.
+    System.getenv("LUA_SCRIPTS")?.let { folder ->
+        for (script in File(folder).listFiles { f -> f.name.endsWith(".lua") }!!.sortedBy { it.name }) {
+            engine.start()
+            asked.clear()
+            val problem = run(script.readText())
+            println("${script.name}: ${problem ?: "loads"} ${asked.filter { it.startsWith("shortcut") || it.startsWith("watch") }}")
+            for (name in asked.filter { it.startsWith("shortcut(") }.map { it.substringAfter('(').substringBefore(',') }) {
+                main.text = "one two\nthree four\nfive\n"
+                println("   $name: ${engine.dispatch("shortcut", name) ?: "runs"}")
+            }
+            for (event in asked.filter { it.startsWith("watch(") }.map { it.substringAfter('(').substringBefore(',') }) {
+                println("   $event: ${engine.event(event, "x") ?: "runs"} ${printed.takeLast(1)}")
+            }
+        }
+        engine.start()
+    }
+
+    // Starting afresh forgets everything scripts set up.
+    eq(null, engine.start(), "a fresh interpreter")
+    eq("nil", value("ticks"), "has none of the old values")
+    eq(null, engine.dispatch("shortcut", "Shout"), "nor the old commands")
+    engine.stop()
+    ok(engine.eval("1") != null && !engine.running, "after stopping, nothing runs")
+
+    // Shortcuts as scripts write them.
+    eq(KeyBinding(Sci.SCMOD_CTRL or Sci.SCMOD_ALT or Sci.SCMOD_SHIFT, 'D'.code), Shortcuts.parse("Ctrl+Alt+Shift+D"), "a shortcut in words")
+    eq(KeyBinding(Sci.SCMOD_CTRL, Shortcuts.FUNCTION + 5), Shortcuts.parse("ctrl+f5"), "in any case")
+    eq(KeyBinding(Sci.SCMOD_ALT, Sci.SCK_PRIOR), Shortcuts.parse("Alt+PageUp"), "a named key")
+    eq(KeyBinding(Sci.SCMOD_CTRL, Sci.SCK_ADD), Shortcuts.parse("Ctrl++"), "the plus key")
+    eq(null, Shortcuts.parse(""), "no shortcut")
+    eq(null, Shortcuts.parse("D"), "a key that types is not a shortcut")
+    eq(null, Shortcuts.parse("Ctrl+;"), "nor is a key this app has no shortcut for")
+    val table = ShortcutTable(mapOf("Edit > Copy" to KeyBinding(Sci.SCMOD_CTRL, 'C'.code)))
+    table.added = mapOf("Plugins > Lua Script > Copy Line" to KeyBinding(Sci.SCMOD_CTRL, 'C'.code))
+    eq(listOf("Plugins > Lua Script > Copy Line", "Edit > Copy"), table.commands(Sci.SCMOD_CTRL, 'C'.code), "a script's shortcut is asked before a built-in one")
+    table.assign("Plugins > Lua Script > Copy Line", KeyBinding(Sci.SCMOD_ALT, 'L'.code))
+    eq(listOf("Edit > Copy"), table.commands(Sci.SCMOD_CTRL, 'C'.code), "and can be changed like any other")
+
+    // Notepad++'s command ids.
+    val commands = NppCommands(File(files, "menu.tsv").readText())
+    eq("Edit > Line Operations > Join Lines", commands.path(42013), "a Notepad++ command id leads to its place in the menus")
+    ok(commands.size > 400 && commands.path(1) == null, "for every command of its menu")
+}
+
 fun main(args: Array<String>) {
     val assets = File(args.firstOrNull() ?: "app/src/main/assets/npp")
     ScintillaNative.init(HostPlatform(), 2.0f, 48f)
+    if (System.getenv("POCKETPAD_ONLY") == "lua") {
+        testLua(assets)
+        println("core: ${checks - failures}/$checks checks passed")
+        exitProcess(if (failures == 0) 0 else 1)
+    }
     testEncodings()
     val (registry, theme) = testLanguages(assets)
     testLexers(registry, theme)
@@ -1300,6 +1554,7 @@ fun main(args: Array<String>) {
     testUserLanguages(assets, registry, theme)
     testCompare()
     testHexBuffer()
+    testLua(assets)
     println("core: ${checks - failures}/$checks checks passed")
     exitProcess(if (failures == 0) 0 else 1)
 }

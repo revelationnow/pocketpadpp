@@ -47,6 +47,39 @@ object Shortcuts {
         return text.append(keyName(binding.key)).toString()
     }
 
+    /**
+     * A shortcut as scripts write it for npp.AddShortcut: "Ctrl+Alt+Shift+D", "ctrl+f5", "Alt+PageUp".
+     * Null if there is no key in it, or one this app has no shortcut for.
+     */
+    fun parse(text: String): KeyBinding? {
+        var modifiers = 0
+        var key = 0
+        // A "+" at the end is the plus key itself, not a separator.
+        val parts = text.trim().removeSuffix("+").split('+').map { it.trim().lowercase() }.toMutableList()
+        if (text.trim().endsWith("+")) parts += "+"
+        for (part in parts) {
+            when (part) {
+                "ctrl", "control" -> modifiers = modifiers or Sci.SCMOD_CTRL
+                "alt" -> modifiers = modifiers or Sci.SCMOD_ALT
+                "shift" -> modifiers = modifiers or Sci.SCMOD_SHIFT
+                "" -> {}
+                else -> {
+                    if (key != 0) return null
+                    key = when (part) {
+                        "pageup", "pgup", "prior" -> Sci.SCK_PRIOR
+                        "pagedown", "pgdn", "next" -> Sci.SCK_NEXT
+                        "del" -> Sci.SCK_DELETE
+                        "ins" -> Sci.SCK_INSERT
+                        "return" -> Sci.SCK_RETURN
+                        "=" -> Sci.SCK_ADD
+                        else -> KEYS.firstOrNull { it.first.lowercase() == part }?.second ?: return null
+                    }
+                }
+            }
+        }
+        return if (key == 0) null else KeyBinding(modifiers, key).takeIf { usable(it) }
+    }
+
     /** A shortcut must not take over a key that types: it needs Ctrl or Alt unless it is a function key. */
     fun usable(binding: KeyBinding): Boolean =
         binding.key in names && (binding.key > FUNCTION || binding.modifiers and (Sci.SCMOD_CTRL or Sci.SCMOD_ALT) != 0)
@@ -56,11 +89,19 @@ object Shortcuts {
  * Which shortcut runs which command. Commands are known by an id; [defaults] are the shortcuts they come with
  * and the user's changes are kept apart from them, so they can be saved on their own and undone one by one.
  */
-class ShortcutTable(private val defaults: Map<String, KeyBinding>) {
+class ShortcutTable(private val builtIn: Map<String, KeyBinding>) {
     // A null value means the user removed the command's shortcut.
     private val custom = LinkedHashMap<String, KeyBinding?>()
 
-    fun binding(id: String): KeyBinding? = if (id in custom) custom[id] else defaults[id]
+    /**
+     * Shortcuts that commands added while the app runs come with, such as those of Lua scripts. They are
+     * asked first when a key is pressed, so a script's shortcut wins over a built-in command's.
+     */
+    var added: Map<String, KeyBinding> = emptyMap()
+
+    private val defaults: Map<String, KeyBinding> get() = if (added.isEmpty()) builtIn else added + builtIn.filterKeys { it !in added }
+
+    fun binding(id: String): KeyBinding? = if (id in custom) custom[id] else added[id] ?: builtIn[id]
 
     fun isCustom(id: String): Boolean = id in custom
 

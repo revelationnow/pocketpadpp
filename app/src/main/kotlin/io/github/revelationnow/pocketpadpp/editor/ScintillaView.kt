@@ -105,6 +105,18 @@ class ScintillaView @JvmOverloads constructor(
      */
     var onCharAdded: ((Int) -> Unit)? = null
 
+    /** Called after the caret, the selection, the text or the scroll position changed, with SC_UPDATE_* bits saying which. */
+    var onUpdateUi: ((Int) -> Unit)? = null
+
+    /**
+     * Called for the rarer notifications scripts can ask for (save point, double click, margin click, zoom,
+     * typing into a read-only document), a moment after they happened: code, position, line, modifiers, margin.
+     */
+    var onNotification: ((Int, Long, Long, Int, Int) -> Unit)? = null
+
+    /** The native editor, for code in the same library that talks to it directly. */
+    internal val nativePtr: Long get() = ptr
+
     /**
      * Modifiers held by the on-screen Ctrl, Alt and Shift keys, as SCMOD_* bits. They apply to whatever key
      * comes next, from the soft keyboard, the extra keys row or a hardware keyboard.
@@ -1022,6 +1034,9 @@ class ScintillaView @JvmOverloads constructor(
     ) {
         if (code == Sci.SCN_CHARADDED) {
             onCharAdded?.invoke(ch)
+        } else if (code in LATER && onNotification != null) {
+            // Not from inside whatever Scintilla is in the middle of: a listener may want to change the text.
+            handler.post { if (ptr != 0L) onNotification?.invoke(code, position, line, modifiers, margin) }
         } else if (code == Sci.SCN_UPDATEUI) {
             pendingUpdate = pendingUpdate or updated
             if (!updatePosted) {
@@ -1051,6 +1066,7 @@ class ScintillaView @JvmOverloads constructor(
             onTextChanged?.invoke()
         }
         onStateChanged?.invoke()
+        onUpdateUi?.invoke(what)
         invalidate()
     }
 
@@ -1142,6 +1158,11 @@ class ScintillaView @JvmOverloads constructor(
     }
 
     companion object {
+        private val LATER = setOf(
+            Sci.SCN_SAVEPOINTREACHED, Sci.SCN_SAVEPOINTLEFT, Sci.SCN_MODIFYATTEMPTRO, Sci.SCN_DOUBLECLICK,
+            Sci.SCN_MARGINCLICK, Sci.SCN_ZOOM,
+        )
+
         /** Added to n for the F-keys in [onShortcut]: F3 is KEY_FUNCTION + 3. */
         const val KEY_FUNCTION = 0x1000
         private const val EXTRA_ACTION = 0x4000

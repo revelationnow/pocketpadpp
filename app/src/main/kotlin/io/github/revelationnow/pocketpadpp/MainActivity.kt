@@ -36,6 +36,7 @@ import io.github.revelationnow.pocketpadpp.app.FindBar
 import io.github.revelationnow.pocketpadpp.app.FolderNode
 import io.github.revelationnow.pocketpadpp.app.FolderTree
 import io.github.revelationnow.pocketpadpp.app.HexView
+import io.github.revelationnow.pocketpadpp.app.LuaConsole
 import io.github.revelationnow.pocketpadpp.app.PanelSpec
 import io.github.revelationnow.pocketpadpp.app.SidePanel
 import io.github.revelationnow.pocketpadpp.app.LoadedFile
@@ -62,6 +63,8 @@ import io.github.revelationnow.pocketpadpp.core.StyleOverrides
 import io.github.revelationnow.pocketpadpp.core.WordStyle
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
+import io.github.revelationnow.pocketpadpp.core.LuaEngine
+import io.github.revelationnow.pocketpadpp.core.NppCommands
 import io.github.revelationnow.pocketpadpp.core.Hashes
 import io.github.revelationnow.pocketpadpp.core.HexBuffer
 import io.github.revelationnow.pocketpadpp.core.Invisibles
@@ -246,7 +249,10 @@ open class MainActivity : Activity() {
             if (options.autoIndent) EditOps.autoIndent(editor, ch)
             macroPaused = false
             completeWhileTyping(ch)
+            if ("OnChar" in luaWatched) luaEvent("OnChar", String(Character.toChars(ch)))
         }
+        editor.onUpdateUi = { what -> luaUpdateUi(what) }
+        editor.onNotification = { code, position, line, modifiers, margin -> luaNotification(code, position, line, modifiers, margin) }
         editor.onMacroStep = { message, wParam, lParam, text ->
             if (recording && !macroPaused) currentMacro += MacroStep(message, wParam, lParam, text)
         }
@@ -266,7 +272,15 @@ open class MainActivity : Activity() {
         editor.requestFocus()
         refreshTabs()
 
-        if (secondWindow) handleIntent(intent) else restoreSession { handleIntent(intent) }
+        if (secondWindow) {
+            handleIntent(intent)
+            startLua()
+        } else {
+            restoreSession {
+                handleIntent(intent)
+                startLua()
+            }
+        }
     }
 
     /**
@@ -347,6 +361,14 @@ open class MainActivity : Activity() {
         }
         root.addView(results, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.3f).toInt()))
 
+        luaConsole = LuaConsole(themed, palette)
+        luaConsole.onRun = { code -> luaEval(code) }
+        luaConsole.onClear = { clearLuaConsole() }
+        luaConsole.onClose = { showLuaConsole(false) }
+        luaConsole.visibility = if (luaConsoleShown) View.VISIBLE else View.GONE
+        luaConsole.show(luaOutput)
+        root.addView(luaConsole, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.3f).toInt()))
+
         imeLogView = TextView(themed).apply {
             typeface = Typeface.MONOSPACE
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
@@ -399,6 +421,7 @@ open class MainActivity : Activity() {
 
     override fun onDestroy() {
         destroyed = true
+        stopLua()
         io.shutdown()
         searchEditor?.destroy()
         otherView?.destroy()
@@ -796,6 +819,7 @@ open class MainActivity : Activity() {
         shownDirty = unsaved(workspace.active)
         tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, unsaved(it), it === workspace.active, it.colour, it.pinned) })
         updateStatus()
+        luaFollowTabs()
     }
 
     private fun onEditorStateChanged() {
@@ -883,7 +907,8 @@ open class MainActivity : Activity() {
                 ui.post {
                     if (destroyed) return@post
                     result.onSuccess {
-                        workspace.open(uri, it)
+                        val doc = workspace.open(uri, it)
+                        luaEvent("OnOpen", luaPath(doc), doc.id)
                         then?.invoke()
                     }.onFailure { toast("Cannot open the file: ${it.message ?: it.javaClass.simpleName}") }
                 }
@@ -950,6 +975,8 @@ open class MainActivity : Activity() {
     }
 
     private fun write(doc: Doc, uri: Uri, name: String, markSaved: Boolean, then: (() -> Unit)?) {
+        // Scripts may tidy the text first.
+        luaEvent("OnBeforeSave", luaPath(doc), doc.id)
         // The text is copied on the UI thread; encoding and writing happen in the background.
         val utf8 = workspace.bytesForSaving()
         val encoding = doc.encoding
@@ -965,6 +992,9 @@ open class MainActivity : Activity() {
                     if (markSaved) workspace.markSaved(doc, uri, name)
                     // A language definition takes effect when it is saved.
                     if (uri.scheme == "file" && uri.path?.startsWith(udlFolder().path) == true) reloadUserLanguages()
+                    luaEvent("OnSave", luaPath(doc), doc.id)
+                    // The startup script takes effect when it is saved.
+                    if (uri.scheme == "file" && uri.path == startupScript().path) restartLua()
                     toast(if (complete) "Saved $name" else "Saved, but ${encoding.label} cannot hold every character; those were written as ?")
                     then?.invoke()
                 }.onFailure {
@@ -2951,6 +2981,7 @@ open class MainActivity : Activity() {
                     }
                     FileIo.persistAccess(this, renamed)
                     workspace.renamed(doc, renamed, FileIo.displayName(this, renamed))
+                    luaEvent("OnFileRenamed", luaPath(doc), doc.id)
                 } catch (e: Exception) {
                     toast("Cannot rename: ${e.message ?: e.javaClass.simpleName}")
                 }
@@ -3546,6 +3577,335 @@ open class MainActivity : Activity() {
 
     // endregion
 
+    // region Plugins: Lua Script
+
+    // Notepad++'s LuaScript plugin, built in: Lua 5.4 with the same editor and npp objects, a console, a
+    // startup script, and commands of the scripts' own in this menu. See docs/LUA.md.
+    private var lua: LuaEngine? = null
+    private val luaCommands = LinkedHashMap<String, String>()
+    private val luaWatched = HashSet<String>()
+    private val luaTimers = HashMap<Long, Runnable>()
+    private val luaOutput = android.text.SpannableStringBuilder()
+    private lateinit var luaConsole: LuaConsole
+    internal var luaConsoleShown = false
+        private set
+    internal val luaConsoleText: String get() = luaOutput.toString()
+    private val luaTabs = HashSet<Doc>()
+    private var luaActive: Doc? = null
+    private var luaLanguage: Any? = null
+    private var luaFollowing = false
+    private val nppCommands by lazy { NppCommands(asset("lua/menu.tsv")) }
+    // Notepad++'s language types in their order: id name, number, language name, display name.
+    private val nppLanguages by lazy { asset("lua/langs.tsv").lines().map { it.split('\t') }.filter { it.size >= 4 } }
+
+    private fun asset(name: String): String = assets.open(name).use { it.readBytes().toString(Charsets.UTF_8) }
+
+    private fun luaFolder() = java.io.File(filesDir, "lua").apply { mkdirs() }
+
+    internal fun startupScript() = java.io.File(luaFolder(), "startup.lua")
+
+    /** The interpreter, started when first needed. */
+    private fun luaEngine(): LuaEngine {
+        lua?.let { return it }
+        val engine = LuaEngine(
+            asset("lua/prelude.lua"), mapOf("iface" to asset("lua/iface.lua"), "constants" to asset("lua/constants.lua")),
+        ) { name, args -> luaRequest(name, args) }
+        engine.editors = { editor.nativePtr to (otherView?.nativePtr ?: 0L) }
+        lua = engine
+        engine.start()?.let { luaPrint("Lua could not start: $it", true) }
+        luaTabs.clear()
+        luaTabs += workspace.docs
+        luaActive = workspace.active
+        luaLanguage = workspace.active.language
+        return engine
+    }
+
+    /** At start-up: Lua is only woken if there is a startup script for it. */
+    private fun startLua() {
+        if (startupScript().exists()) restartLua()
+    }
+
+    private fun stopLua() {
+        for (timer in luaTimers.values) ui.removeCallbacks(timer)
+        luaTimers.clear()
+        luaCommands.clear()
+        luaWatched.clear()
+        shortcutTable.added = emptyMap()
+        lua?.stop()
+        lua = null
+    }
+
+    /** A fresh interpreter: what scripts had set up is gone, and the startup script runs again. */
+    internal fun restartLua() {
+        stopLua()
+        val engine = luaEngine()
+        val script = startupScript()
+        if (script.exists()) {
+            runCatching { script.readText() }.onSuccess { code -> engine.run(script.name, code)?.let { luaProblem(it) } }
+        }
+        luaEvent("OnReady")
+        menuSheet?.refresh()
+    }
+
+    private fun luaPrint(text: String, error: Boolean) {
+        LuaConsole.append(luaOutput, text, error, palette)
+        luaConsole.show(luaOutput)
+    }
+
+    /** An error outside the console: it is kept there, and said in a few words if the console is not showing. */
+    private fun luaProblem(message: String) {
+        luaPrint(message, true)
+        if (!luaConsoleShown) toast("Lua: " + message.lineSequence().first().take(120))
+    }
+
+    private fun clearLuaConsole() {
+        luaOutput.clear()
+        luaConsole.show(luaOutput)
+    }
+
+    internal fun showLuaConsole(on: Boolean) {
+        luaConsoleShown = on
+        luaConsole.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) {
+            luaEngine()
+            luaConsole.show(luaOutput)
+        } else {
+            editor.requestFocus()
+        }
+        menuSheet?.refresh()
+    }
+
+    /** How long a script may run before it is stopped; five seconds unless set otherwise, and again after a restart. */
+    internal fun luaTimeLimit(millis: Int) = luaEngine().setTimeLimit(millis)
+
+    /** A line typed into the console. */
+    internal fun luaEval(code: String) {
+        luaPrint("> $code", false)
+        luaEngine().eval(code)?.let { luaPrint(it, true) }
+    }
+
+    /** Plugins > Lua Script > Execute Current File: the document on screen, run as a script. */
+    internal fun executeCurrentFile() {
+        val name = workspace.active.name
+        val code = editor.text
+        showLuaConsole(true)
+        luaEngine().run(name, code)?.let { luaPrint(it, true) }
+    }
+
+    private fun editStartupScript() {
+        val script = startupScript()
+        if (!script.exists()) script.writeText(LuaEngine.STARTUP_TEMPLATE)
+        openUris(listOf(Uri.fromFile(script)))
+    }
+
+    private fun runLuaCommand(name: String) {
+        lua?.dispatch("shortcut", name)?.let { luaProblem(it) }
+    }
+
+    private fun luaEvent(name: String, vararg args: Any?) {
+        if (name !in luaWatched) return
+        lua?.event(name, *args)?.let { luaProblem(it) }
+    }
+
+    /**
+     * OnUpdateUI. What a handler does to the document (marking words, say) makes Scintilla report an update of
+     * its own; if nothing else changed, that one is not passed on, or the handler would be called without end.
+     */
+    private fun luaUpdateUi(what: Int) {
+        if ("OnUpdateUI" !in luaWatched) return
+        if (luaQuietUpdate && what == Sci.SC_UPDATE_CONTENT) {
+            luaQuietUpdate = false
+            return
+        }
+        luaEvent("OnUpdateUI", what.toLong())
+        luaQuietUpdate = true
+    }
+
+    private var luaQuietUpdate = false
+
+    private fun luaNotification(code: Int, position: Long, line: Long, modifiers: Int, margin: Int) {
+        when (code) {
+            Sci.SCN_SAVEPOINTREACHED -> luaEvent("OnSavePointReached")
+            Sci.SCN_SAVEPOINTLEFT -> luaEvent("OnSavePointLeft")
+            Sci.SCN_MODIFYATTEMPTRO -> luaEvent("OnModifyAttemptRO")
+            Sci.SCN_DOUBLECLICK -> luaEvent("OnDoubleClick", position, line, modifiers.toLong())
+            Sci.SCN_MARGINCLICK -> luaEvent("OnMarginClick", position, margin.toLong(), modifiers.toLong())
+            Sci.SCN_ZOOM -> luaEvent("OnZoom")
+        }
+    }
+
+    /** What scripts know a document by: its file's path, or its name while it has no file. */
+    private fun luaPath(doc: Doc): String {
+        val uri = doc.uri ?: return doc.name
+        return if (uri.scheme == "file") uri.path ?: doc.name else uri.toString()
+    }
+
+    /** Tells scripts when tabs were closed, another tab came to the front or its language changed. */
+    private fun luaFollowTabs() {
+        if (lua == null || luaFollowing) return
+        // A handler may open, close or switch tabs itself; that is followed once it is done.
+        luaFollowing = true
+        try {
+            val docs = workspace.docs
+            if (luaTabs.size != docs.size || !luaTabs.containsAll(docs)) {
+                val closed = luaTabs.count { it !in docs }
+                luaTabs.clear()
+                luaTabs += docs
+                repeat(closed) { luaEvent("OnClose") }
+            }
+            val active = workspace.active
+            if (active !== luaActive) {
+                luaActive = active
+                luaLanguage = active.language
+                luaEvent("OnSwitchFile", luaPath(active), active.id)
+            } else if (active.language !== luaLanguage) {
+                luaLanguage = active.language
+                luaEvent("OnLangChange")
+            }
+        } finally {
+            luaFollowing = false
+        }
+    }
+
+    /** Commands the menus have, by a spelling that forgives capitals, spaces and the dots of "Open...". */
+    private val commandsBySpelling: Map<String, String> by lazy {
+        val found = HashMap<String, String>()
+        fun walk(path: List<String>) {
+            for (entry in entriesAt(path)) {
+                val full = path + entry.id
+                if (entry.children != null) walk(full) else found[spelling(full.joinToString(COMMAND_SEPARATOR))] = full.joinToString(COMMAND_SEPARATOR)
+            }
+        }
+        walk(emptyList())
+        found
+    }
+
+    private fun spelling(path: String) = path.lowercase().filter { it.isLetterOrDigit() || it == '>' || it == '+' || it == '#' }
+
+    /** The command of this app for a place in Notepad++'s menus, or null if there is none. */
+    internal fun commandFor(path: String): String? =
+        if (commandEntry(path) != null) path else (NPP_COMMAND_NAMES[path] ?: commandsBySpelling[spelling(path)])?.takeIf { commandEntry(it) != null }
+
+    /** Notepad++ menu commands (of the 469 this app has) that npp:MenuCommand cannot find here; empty if all is well. */
+    internal fun unknownNppCommands(): List<String> = nppCommands.all.filter { commandFor(it) == null }.sorted()
+
+    private fun luaDoc(id: Any?): Doc = workspace.docs.firstOrNull { it.id == id } ?: throw IllegalArgumentException("there is no document with that buffer id")
+
+    private fun luaInfo(args: Array<Any?>): Any? {
+        val doc = workspace.active
+        val path = luaPath(doc)
+        return when (args.getOrNull(0)) {
+            "name" -> doc.name
+            "path" -> path
+            "directory" -> if (doc.uri?.scheme == "file") path.substringBeforeLast('/', "") else ""
+            "namePart" -> doc.name.substringBeforeLast('.')
+            "extension" -> if ('.' in doc.name) "." + doc.name.substringAfterLast('.') else ""
+            "word" -> {
+                val caret = editor.send(Sci.SCI_GETCURRENTPOS)
+                if (editor.send(Sci.SCI_GETSELECTIONEMPTY) == 0L) editor.range(editor.send(Sci.SCI_GETSELECTIONSTART), editor.send(Sci.SCI_GETSELECTIONEND)).toString(Charsets.UTF_8)
+                else editor.range(editor.send(Sci.SCI_WORDSTARTPOSITION, caret, 1), editor.send(Sci.SCI_WORDENDPOSITION, caret, 1)).toString(Charsets.UTF_8)
+            }
+            "appDirectory" -> filesDir.path
+            "scripts" -> luaFolder().path
+            // 0 for every open file, 1 for the first view, 2 for the second.
+            "count" -> if (args.getOrNull(1) == 2L) (if (otherDoc != null) 1L else 0L) else workspace.docs.size.toLong()
+            "index" -> (if (args.getOrNull(1) == 1L) otherDoc?.let { workspace.docs.indexOf(it) } ?: -1 else workspace.docs.indexOf(doc)).toLong()
+            "id" -> doc.id
+            "pathOf" -> luaPath(luaDoc(args.getOrNull(1)))
+            "idAt" -> workspace.docs.getOrNull((args.getOrNull(1) as? Long ?: -1L).toInt())?.id ?: 0L
+            "version" -> versionName().split('.', '-').mapNotNull { it.toLongOrNull() }.let { (it.getOrElse(0) { 0L } shl 16) or it.getOrElse(1) { 0L } }
+            "language" -> doc.language.display
+            "langType" -> {
+                val language = luaDoc(args.getOrNull(1)).language
+                val row = nppLanguages.firstOrNull { it[2] == language.name } ?: nppLanguages.firstOrNull { it[0] == (if (language.user != null) "L_USER" else "L_TEXT") }
+                row?.get(1)?.toLongOrNull() ?: 0L
+            }
+            "languageName" -> nppLanguages.firstOrNull { it[1].toLongOrNull() == args.getOrNull(1) }?.get(2) ?: ""
+            "languageDescription" -> nppLanguages.firstOrNull { it[1].toLongOrNull() == args.getOrNull(1) }?.get(3) ?: ""
+            else -> null
+        }
+    }
+
+    /** What scripts ask of the app (see assets/lua/prelude.lua). What is thrown here is an error in the script. */
+    private fun luaRequest(name: String, args: Array<Any?>): Any? {
+        when (name) {
+            "scripts" -> return luaFolder().path
+            "print" -> luaPrint(args.getOrNull(0) as? String ?: "", args.getOrNull(1) == true)
+            "clear" -> clearLuaConsole()
+            "info" -> return luaInfo(args)
+            "command" -> {
+                val asked = args.getOrNull(0)
+                val path = if (asked is Long) nppCommands.path(asked) ?: throw IllegalArgumentException("MenuCommand: Notepad++ has no menu command numbered $asked") else asked as String
+                val command = commandFor(path) ?: throw IllegalArgumentException("MenuCommand: Pocketpad++ has no command \"$path\"")
+                return runCommand(command)
+            }
+            "open" -> {
+                val file = java.io.File(args.getOrNull(0) as? String ?: return false)
+                if (!file.isFile || !file.canRead()) return false
+                openUris(listOf(Uri.fromFile(file)))
+                return true
+            }
+            "switch" -> {
+                val wanted = args.getOrNull(0) as? String ?: return false
+                val doc = workspace.docs.firstOrNull { luaPath(it) == wanted } ?: workspace.docs.firstOrNull { it.name == wanted } ?: return false
+                workspace.activate(doc)
+                return true
+            }
+            "activate" -> workspace.docs.getOrNull((args.getOrNull(1) as? Long ?: -1L).toInt())?.let { workspace.activate(it) }
+            "save" -> {
+                save()
+                return true
+            }
+            "saveAll" -> {
+                saveAll()
+                return true
+            }
+            "language" -> {
+                val wanted = (args.getOrNull(0) as? String ?: "").lowercase()
+                val languages = workspace.languages
+                val language = languages.byName(wanted) ?: (languages.languages + languages.userLanguages).firstOrNull { it.display.lowercase() == wanted } ?: return false
+                workspace.setLanguage(language)
+                return true
+            }
+            "langType" -> {
+                val doc = luaDoc(args.getOrNull(0))
+                val row = nppLanguages.firstOrNull { it[1].toLongOrNull() == args.getOrNull(1) } ?: throw IllegalArgumentException("BufferLangType: not one of the L_ constants")
+                val language = workspace.languages.byName(row[2]) ?: throw IllegalArgumentException("BufferLangType: ${row[0]} is not a language of this app")
+                if (doc !== workspace.active) workspace.activate(doc)
+                workspace.setLanguage(language)
+            }
+            "toast" -> toast(args.getOrNull(0)?.toString() ?: "")
+            "watch" -> (args.getOrNull(0) as? String)?.let { if (args.getOrNull(1) == true) luaWatched += it else luaWatched -= it }
+            "shortcut" -> {
+                val label = args.getOrNull(0) as? String ?: return null
+                if (label in LUA_MENU) throw IllegalArgumentException("AddShortcut: \"$label\" is a command of the Lua Script menu itself")
+                luaCommands[label] = args.getOrNull(1) as? String ?: ""
+                shortcutTable.added = luaCommands.mapNotNull { (command, keys) ->
+                    Shortcuts.parse(keys)?.let { listOf("Plugins", "Lua Script", command).joinToString(COMMAND_SEPARATOR) to it }
+                }.toMap()
+                menuSheet?.refresh()
+            }
+            "timer" -> {
+                val id = args.getOrNull(0) as? Long ?: return null
+                val every = (args.getOrNull(1) as? Long ?: 1000L).coerceAtLeast(LUA_TIMER_MIN_MS)
+                val tick = object : Runnable {
+                    override fun run() {
+                        if (destroyed || luaTimers[id] !== this) return
+                        lua?.dispatch("timer", id)?.let { luaProblem(it) }
+                        if (luaTimers[id] === this) ui.postDelayed(this, every)
+                    }
+                }
+                luaTimers[id] = tick
+                ui.postDelayed(tick, every)
+            }
+            "stopTimer" -> luaTimers.remove(args.getOrNull(0))?.let { ui.removeCallbacks(it) }
+            else -> throw IllegalArgumentException("Pocketpad++ does not know the request \"$name\"")
+        }
+        return null
+    }
+
+    // endregion
+
     // region Plugins: Hex Editor
 
     // Notepad++'s HEX-Editor plugin, built in. A saved file is shown as the bytes stored in it and saved back
@@ -3829,6 +4189,17 @@ open class MainActivity : Activity() {
     private fun compareOptions() = DiffOptions(prefs.getBoolean("compareIgnoreCase", false), prefs.getBoolean("compareIgnoreSpaces", false))
 
     private fun MenuSpec.pluginsMenu() {
+        sub("Lua Script") {
+            item("Show Console", checked = luaConsoleShown) { showLuaConsole(!luaConsoleShown) }
+            item("Execute Current File") { executeCurrentFile() }
+            item("Edit Startup Script") { editStartupScript() }
+            item("Restart Lua") {
+                restartLua()
+                toast("Lua was started afresh")
+            }
+            // The commands scripts added with npp.AddShortcut.
+            for (name in luaCommands.keys) item(name) { runLuaCommand(name) }
+        }
         sub("Hex Editor") {
             val shown = hexSessions.containsKey(workspace.active)
             item("View in HEX", checked = shown) { setHexView(!shown) }
@@ -4604,6 +4975,18 @@ open class MainActivity : Activity() {
         const val PROJECT_PANELS = 3
         const val PANEL_DOCUMENTS = "Documents"
         const val MAP_WIDTH_DP = 72f
+
+        /** The Lua Script menu's own commands, which a script's command may not be named after. */
+        val LUA_MENU = setOf("Show Console", "Execute Current File", "Edit Startup Script", "Restart Lua")
+
+        /** A script's timer does not fire more often than this. */
+        const val LUA_TIMER_MIN_MS = 20L
+
+        /**
+         * Notepad++ menu commands whose place or name in this app's menus is not the one in Notepad++'s menu
+         * resource, for npp:MenuCommand(IDM_...).
+         */
+        val NPP_COMMAND_NAMES: Map<String, String> = mapOf()
 
         /** The largest file HEX view takes: its bytes are all held in memory. */
         const val HEX_MAX_BYTES = 16L * 1024 * 1024

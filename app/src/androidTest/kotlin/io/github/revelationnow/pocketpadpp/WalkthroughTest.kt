@@ -628,8 +628,12 @@ class WalkthroughTest {
         tapDescribed("Close")
 
         openMenu("Search", "Replace...")
-        val replaceFields = device.findObjects(By.clazz("android.widget.EditText"))
-        assertEquals("replace mode shows two fields", 2, replaceFields.size)
+        // Looked for until they are there: the bar is still opening when the menu has gone.
+        var replaceFields = emptyList<UiObject2>()
+        waitUntil("replace mode to show two fields") {
+            replaceFields = device.findObjects(By.clazz("android.widget.EditText"))
+            replaceFields.size == 2
+        }
         replaceFields[0].text = "(\\w+) beta"
         replaceFields[1].text = "$1 BETA"
         tapDescribed("Regular expression")
@@ -2787,6 +2791,113 @@ class WalkthroughTest {
             sci(Sci.SCI_UNDO)
             assertEquals("AB", text())
         } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun luaScripting() {
+        fun console() = onUi { it.luaConsoleText }
+        fun type(code: String) {
+            device.wait(Until.findObject(By.desc("Lua input")), 4000)!!.text = code
+            tapDescribed("Run Lua")
+        }
+        fun press(key: Int, meta: Int) {
+            val now = SystemClock.uptimeMillis()
+            instrumentation.sendKeySync(KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0, meta))
+            instrumentation.sendKeySync(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0, meta))
+        }
+        val startup = onUi { it.startupScript() }
+        startup.delete()
+        val file = File(context.cacheDir, "spaces.txt").apply { writeText("a  \nb\t\nc\n") }
+        try {
+            // The console: values, the editor, the app, and mistakes.
+            setText("hello")
+            openMenu("Plugins", "Lua Script", "Show Console")
+            tapDescribed("Close menu")
+            assertTrue(onUi { it.luaConsoleShown })
+            type("1 + 2")
+            waitUntil("the console to answer") { console().endsWith("> 1 + 2\n3\n") }
+            type("editor:AppendText(' world')")
+            waitUntil("the script to change the text") { text() == "hello world" }
+            type("editor.Length")
+            waitUntil("a property of the editor") { console().endsWith("\n11\n") }
+            type("npp:GetFileName()")
+            waitUntil("a question to the app") { console().endsWith("\nnew 1\n") }
+            type("editor:NoSuchThing()")
+            waitUntil("a mistake to be named") { console().contains("no function or property called 'NoSuchThing'") }
+            shot("lua-console")
+
+            // A Notepad++ menu command by its id.
+            setText("one\ntwo\nthree")
+            sci(Sci.SCI_SELECTALL)
+            type("npp:MenuCommand(IDM_EDIT_JOIN_LINES)")
+            waitUntil("the menu command to run") { text() == "one two three" }
+            // Which of Notepad++'s commands have no counterpart, for the record.
+            val unmatched = onUi { it.unknownNppCommands() }
+            for (path in unmatched) Log.i(TAG, "npp command without a match: $path")
+            Log.i(TAG, "npp commands without a match: ${unmatched.size}")
+
+            // Execute Current File: a script that adds a command and tidies files before they are saved.
+            tap("New")
+            setText(
+                "npp.AddShortcut('Shout', 'Ctrl+Alt+U', function() editor:SelectAll() editor:UpperCase() end)\n" +
+                    "npp.AddEventHandler('OnBeforeSave', function(name) for m in editor:match('[ \\t]+$', SCFIND_REGEXP) do m:replace('') end end)\n" +
+                    "npp.AddEventHandler('OnSwitchFile', function(name, id) print('now at ' .. name) end)\n" +
+                    "print('script loaded')\n",
+            )
+            openMenu("Plugins", "Lua Script", "Execute Current File")
+            waitUntil("the script to run") { console().contains("script loaded") }
+
+            // Its command is in the menu and has its shortcut.
+            onUi { activity -> activity.workspace.activate(activity.workspace.docs.first()) }
+            waitUntil("the script to hear of the other tab") { console().endsWith("now at new 1\n") }
+            setText("quiet")
+            openMenu("Plugins", "Lua Script")
+            assertTrue("the shortcut shows beside the command", onScreen("Ctrl+Alt+U"))
+            shot("lua-menu")
+            menu("Shout")
+            waitUntil("the script's command to run") { text() == "QUIET" }
+            setText("again")
+            onUi { it.editor.requestFocus() }
+            press(KeyEvent.KEYCODE_U, KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON)
+            waitUntil("the script's shortcut to run it") { text() == "AGAIN" }
+
+            // Its handler runs before a file is saved.
+            onUi { it.openUris(listOf(Uri.fromFile(file))) }
+            waitUntil("the file to open") { onUi { it.workspace.active.name } == "spaces.txt" }
+            tap("Save")
+            waitUntil("the saved file to be tidied") { file.readText() == "a\nb\nc\n" }
+            assertEquals("a\nb\nc\n", text())
+
+            // A script that never ends is stopped: after five seconds, or sooner here.
+            onUi { it.luaTimeLimit(1500) }
+            type("while true do end")
+            waitUntil("the endless loop to be stopped", 15000) { console().contains("was stopped") }
+            type("'still ' .. 'here'")
+            waitUntil("Lua to go on working") { console().endsWith("\nstill here\n") }
+
+            // The startup script: saved, it takes effect, and what earlier scripts set up is gone.
+            openMenu("Plugins", "Lua Script", "Edit Startup Script")
+            waitUntil("the startup script to open") { onUi { it.workspace.active.name } == "startup.lua" }
+            assertTrue("it starts with examples", text().contains("npp.AddShortcut"))
+            assertEquals("Lua", onUi { it.workspace.active.language.display })
+            onUi { it.editor.text = "npp.AddShortcut('From Startup', '', function() editor:AddText('S') end)\nprint('started')\n" }
+            tap("Save")
+            waitUntil("the startup script to run") { console().contains("started") }
+            assertNull("the earlier script's command is gone", onUi { it.commandFor("Plugins > Lua Script > Shout") })
+            shot("lua-startup")
+
+            // It runs when the app starts.
+            scenario.close()
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            device.waitForIdle()
+            waitUntil("the startup script to run at start-up") { console().contains("started") }
+            tap("New")
+            openMenu("Plugins", "Lua Script", "From Startup")
+            waitUntil("the startup script's command to run") { text() == "S" }
+        } finally {
+            startup.delete()
             file.delete()
         }
     }

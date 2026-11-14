@@ -27,10 +27,10 @@ It does not yet mean checked by hand on a range of devices.
 | 5 | Customisation: preferences, style configurator and themes, shortcut mapper, user-defined languages | 15 | 0 |
 | 6 | Macros, run, tools, printing | 20 | 0 |
 
-Not counted above because they are not menu commands: the plugin system (Notepad++ plugins are
-Windows DLLs and cannot be loaded; an extension mechanism of our own would be a separate project),
+Not counted above because they are not menu commands: plugins (Notepad++ plugins are Windows DLLs
+and cannot be loaded; Compare, the Hex Editor and Lua scripting are built in instead, see the README),
 and behaviour that lives in Preferences such as auto-completion settings, backup intervals and
-the many editing options, which phase 5 will inventory separately.
+the many editing options.
 
 Regular expressions currently use the C++ standard library's ECMAScript syntax; Notepad++ uses
 Boost.Regex (Perl syntax, including lookbehind and `\K`). Matching that is a phase 3 item.

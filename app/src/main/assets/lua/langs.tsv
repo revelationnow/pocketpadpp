@@ -1,0 +1,98 @@
+L_TEXT	0	normal	Normal text
+L_PHP	1	php	PHP
+L_C	2	c	C
+L_CPP	3	cpp	C++
+L_CS	4	cs	C#
+L_OBJC	5	objc	Objective-C
+L_JAVA	6	java	Java
+L_RC	7	rc	RC
+L_HTML	8	html	HTML
+L_XML	9	xml	XML
+L_MAKEFILE	10	makefile	Makefile
+L_PASCAL	11	pascal	Pascal
+L_BATCH	12	batch	Batch
+L_INI	13	ini	ini
+L_ASCII	14	nfo	NFO
+L_USER	15	udf	udf
+L_ASP	16	asp	ASP
+L_SQL	17	sql	SQL
+L_VB	18	vb	Visual Basic
+L_JS_EMBEDDED	19	javascript	Embedded JS
+L_CSS	20	css	CSS
+L_PERL	21	perl	Perl
+L_PYTHON	22	python	Python
+L_LUA	23	lua	Lua
+L_TEX	24	tex	TeX
+L_FORTRAN	25	fortran	Fortran free form
+L_BASH	26	bash	Shell
+L_FLASH	27	actionscript	ActionScript
+L_NSIS	28	nsis	NSIS
+L_TCL	29	tcl	TCL
+L_LISP	30	lisp	Lisp
+L_SCHEME	31	scheme	Scheme
+L_ASM	32	asm	Assembly
+L_DIFF	33	diff	Diff
+L_PROPS	34	props	Properties file
+L_PS	35	postscript	PostScript
+L_RUBY	36	ruby	Ruby
+L_SMALLTALK	37	smalltalk	Smalltalk
+L_VHDL	38	vhdl	VHDL
+L_KIX	39	kix	KiXtart
+L_AU3	40	autoit	AutoIt
+L_CAML	41	caml	CAML
+L_ADA	42	ada	Ada
+L_VERILOG	43	verilog	Verilog
+L_MATLAB	44	matlab	MATLAB
+L_HASKELL	45	haskell	Haskell
+L_INNO	46	inno	Inno Setup
+L_SEARCHRESULT	47	searchResult	Internal Search
+L_CMAKE	48	cmake	CMake
+L_YAML	49	yaml	YAML
+L_COBOL	50	cobol	COBOL
+L_GUI4CLI	51	gui4cli	Gui4Cli
+L_D	52	d	D
+L_POWERSHELL	53	powershell	PowerShell
+L_R	54	r	R
+L_JSP	55	jsp	JSP
+L_COFFEESCRIPT	56	coffeescript	CoffeeScript
+L_JSON	57	json	json
+L_JAVASCRIPT	58	javascript.js	JavaScript
+L_FORTRAN_77	59	fortran77	Fortran fixed form
+L_BAANC	60	baanc	BaanC
+L_SREC	61	srec	S-Record
+L_IHEX	62	ihex	Intel HEX
+L_TEHEX	63	tehex	Tektronix extended HEX
+L_SWIFT	64	swift	Swift
+L_ASN1	65	asn1	ASN.1
+L_AVS	66	avs	AviSynth
+L_BLITZBASIC	67	blitzbasic	BlitzBasic
+L_PUREBASIC	68	purebasic	PureBasic
+L_FREEBASIC	69	freebasic	FreeBasic
+L_CSOUND	70	csound	Csound
+L_ERLANG	71	erlang	Erlang
+L_ESCRIPT	72	escript	ESCRIPT
+L_FORTH	73	forth	Forth
+L_LATEX	74	latex	LaTeX
+L_MMIXAL	75	mmixal	MMIXAL
+L_NIM	76	nim	Nim
+L_NNCRONTAB	77	nncrontab	Nncrontab
+L_OSCRIPT	78	oscript	OScript
+L_REBOL	79	rebol	REBOL
+L_REGISTRY	80	registry	registry
+L_RUST	81	rust	Rust
+L_SPICE	82	spice	Spice
+L_TXT2TAGS	83	txt2tags	txt2tags
+L_VISUALPROLOG	84	visualprolog	Visual Prolog
+L_TYPESCRIPT	85	typescript	TypeScript
+L_JSON5	86	json5	json5
+L_MSSQL	87	mssql	mssql
+L_GDSCRIPT	88	gdscript	GDScript
+L_HOLLYWOOD	89	hollywood	Hollywood
+L_GOLANG	90	go	Go
+L_RAKU	91	raku	Raku
+L_TOML	92	toml	TOML
+L_SAS	93	sas	SAS
+L_ERRORLIST	94	errorlist	ErrorList
+L_ESCSEQ	95	escseq	EscapeSequence (ANSI)
+L_STTXT	96	fcST	Structured Text
+L_EXTERNAL	97	ext	External
