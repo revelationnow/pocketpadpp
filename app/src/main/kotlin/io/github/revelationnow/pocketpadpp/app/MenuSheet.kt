@@ -24,13 +24,20 @@ class MenuSpec {
         val checked: Boolean?,
         val action: (() -> Unit)?,
         val children: (MenuSpec.() -> Unit)?,
+        /** What the command is known by where its label varies; otherwise the label itself. */
+        val id: String = label,
+        /** Shown dimmed at the end of the row, the way desktop menus show shortcuts. */
+        val hint: String = "",
     )
 
     val entries = ArrayList<Entry>()
 
+    /** True while the menus are only being read to list their commands: entries that come and go are left out. */
+    var cataloguing = false
+
     /** A command. With [checked] set it is a toggle or radio item and the menu stays open after it runs. */
-    fun item(label: String, enabled: Boolean = true, checked: Boolean? = null, action: () -> Unit) {
-        entries += Entry(label, enabled, checked, action, null)
+    fun item(label: String, enabled: Boolean = true, checked: Boolean? = null, id: String = label, hint: String = "", action: () -> Unit) {
+        entries += Entry(label, enabled, checked, action, null, id, hint)
     }
 
     /** A submenu, to any depth. Its content is built when it is opened, so it always shows current state. */
@@ -54,6 +61,14 @@ class MenuSheet(private val context: Context, dark: Boolean = false) {
 
 
     private class Level(val title: String, val build: MenuSpec.() -> Unit)
+
+    /** Gives the shortcut to show beside a command, from the labels of the levels above it and its own id. */
+    var hints: ((List<String>) -> String)? = null
+
+    /** Draws the level being shown again, after something it displays has changed. */
+    fun refresh() {
+        if (stack.isNotEmpty() && dialog.isShowing) render()
+    }
 
     /** Called after any command ran, so the screen around the menu can refresh. */
     var onAction: (() -> Unit)? = null
@@ -219,6 +234,17 @@ class MenuSheet(private val context: Context, dark: Boolean = false) {
             setTextColor(if (entry.enabled) textColour else dim)
             setPadding(dp(4f), dp(8f), dp(8f), dp(8f))
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val hint = entry.hint.ifEmpty {
+            if (entry.children == null) hints?.invoke(stack.drop(1).map { it.title } + entry.id) ?: "" else ""
+        }
+        if (hint.isNotEmpty()) {
+            row.addView(TextView(context).apply {
+                this.text = hint
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextColor(dim)
+                maxLines = 1
+            })
+        }
         if (entry.children != null) {
             row.addView(TextView(context).apply {
                 this.text = "›"

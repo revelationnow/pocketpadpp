@@ -792,6 +792,9 @@ class ScintillaView @JvmOverloads constructor(
         }
     }
 
+    /** Commands added after cut, copy and paste in the selection toolbar: their names and what they do. */
+    var extraActions: List<Pair<String, () -> Unit>> = emptyList()
+
     private val actionCallback = object : ActionMode.Callback2() {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
             populate(menu)
@@ -813,6 +816,7 @@ class ScintillaView @JvmOverloads constructor(
                 menu.add(Menu.NONE, android.R.id.paste, 2, android.R.string.paste)
             }
             menu.add(Menu.NONE, android.R.id.selectAll, 3, android.R.string.selectAll)
+            extraActions.forEachIndexed { index, (name, _) -> menu.add(Menu.NONE, EXTRA_ACTION + index, 4 + index, name) }
         }
 
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
@@ -822,6 +826,7 @@ class ScintillaView @JvmOverloads constructor(
                 android.R.id.copy -> { send(Sci.SCI_COPY); send(Sci.SCI_SETEMPTYSELECTION, send(Sci.SCI_GETCURRENTPOS)) }
                 android.R.id.paste -> send(Sci.SCI_PASTE)
                 android.R.id.selectAll -> { send(Sci.SCI_SELECTALL); mode.invalidate(); invalidate(); return true }
+                in EXTRA_ACTION until EXTRA_ACTION + extraActions.size -> extraActions[item.itemId - EXTRA_ACTION].second()
                 else -> return false
             }
             mode.finish()
@@ -1082,6 +1087,31 @@ class ScintillaView @JvmOverloads constructor(
     companion object {
         /** Added to n for the F-keys in [onShortcut]: F3 is KEY_FUNCTION + 3. */
         const val KEY_FUNCTION = 0x1000
+        private const val EXTRA_ACTION = 0x4000
+
+        /** The key of a hardware key press as shortcuts know it, or 0 for keys that cannot be part of one. */
+        fun shortcutKeyOf(event: KeyEvent): Int = when (event.keyCode) {
+            in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'A'.code + (event.keyCode - KeyEvent.KEYCODE_A)
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> '0'.code + (event.keyCode - KeyEvent.KEYCODE_0)
+            in KeyEvent.KEYCODE_F1..KeyEvent.KEYCODE_F12 -> KEY_FUNCTION + 1 + (event.keyCode - KeyEvent.KEYCODE_F1)
+            KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_NUMPAD_ADD -> Sci.SCK_ADD
+            KeyEvent.KEYCODE_MINUS, KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> Sci.SCK_SUBTRACT
+            KeyEvent.KEYCODE_SLASH, KeyEvent.KEYCODE_NUMPAD_DIVIDE -> Sci.SCK_DIVIDE
+            KeyEvent.KEYCODE_DPAD_LEFT -> Sci.SCK_LEFT
+            KeyEvent.KEYCODE_DPAD_RIGHT -> Sci.SCK_RIGHT
+            KeyEvent.KEYCODE_DPAD_UP -> Sci.SCK_UP
+            KeyEvent.KEYCODE_DPAD_DOWN -> Sci.SCK_DOWN
+            KeyEvent.KEYCODE_MOVE_HOME -> Sci.SCK_HOME
+            KeyEvent.KEYCODE_MOVE_END -> Sci.SCK_END
+            KeyEvent.KEYCODE_PAGE_UP -> Sci.SCK_PRIOR
+            KeyEvent.KEYCODE_PAGE_DOWN -> Sci.SCK_NEXT
+            KeyEvent.KEYCODE_DEL -> Sci.SCK_BACK
+            KeyEvent.KEYCODE_FORWARD_DEL -> Sci.SCK_DELETE
+            KeyEvent.KEYCODE_INSERT -> Sci.SCK_INSERT
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> Sci.SCK_RETURN
+            KeyEvent.KEYCODE_TAB -> Sci.SCK_TAB
+            else -> 0
+        }
 
         private const val CARET_HANDLE_MS = 4000L
         private const val SCROLL_BAR_MS = 1500L

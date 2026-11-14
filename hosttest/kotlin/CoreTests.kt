@@ -1,6 +1,12 @@
 package host
 
 import io.github.revelationnow.pocketpadpp.core.EditOps
+import io.github.revelationnow.pocketpadpp.core.EditorOptions
+import io.github.revelationnow.pocketpadpp.core.KeyBinding
+import io.github.revelationnow.pocketpadpp.core.ShortcutTable
+import io.github.revelationnow.pocketpadpp.core.Shortcuts
+import io.github.revelationnow.pocketpadpp.core.StyleChange
+import io.github.revelationnow.pocketpadpp.core.StyleOverrides
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
@@ -14,6 +20,7 @@ import io.github.revelationnow.pocketpadpp.core.SciApi
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
 import io.github.revelationnow.pocketpadpp.core.Searcher
 import io.github.revelationnow.pocketpadpp.core.Session
+import io.github.revelationnow.pocketpadpp.core.RunCommand
 import io.github.revelationnow.pocketpadpp.core.SessionEntry
 import io.github.revelationnow.pocketpadpp.core.SessionStore
 import io.github.revelationnow.pocketpadpp.core.TextEncodings
@@ -703,12 +710,110 @@ private fun testSession() {
         1,
         listOf(
             SessionEntry("content://docs/a%20b?x=1&y=\"2\"", "a <b>.txt", "cpp", "utf-8-bom", 0, 12, 5, 3, 40, null, 0),
-            SessionEntry(null, "new 2", "normal", "utf-8", 2, 0, 0, 0, 0, "new 2@7", 2),
+            SessionEntry(null, "new 2", "normal", "utf-8", 2, 0, 0, 0, 0, "new 2@7", 2, pinned = true),
         ),
     )
     eq(session, SessionStore.read(SessionStore.write(session)), "session round trip")
     eq(Session(0, emptyList()), SessionStore.read("not xml at all"), "unreadable session is empty")
+    eq(
+        "https://example.org/?q=two%20words&f=a%26b.txt&n=a%26b&e=.txt&p=content://x/1",
+        RunCommand.expand("https://example.org/?q=\$(CURRENT_WORD)&f=\$(FILE_NAME)&n=\$(NAME_PART)&e=\$(EXT_PART)&p=\$(FULL_CURRENT_PATH)", "two words", "a&b.txt", "content://x/1"),
+        "run command variables",
+    )
+    eq("x--", RunCommand.expand("x-\$(EXT_PART)-", "", "Makefile", ""), "run command: no extension")
     eq(Session(0, emptyList()), SessionStore.read(""), "empty session text is empty")
+}
+
+private fun testSettings(registry: LanguageRegistry, theme: NppTheme) {
+    // Shortcut mapper.
+    val ctrl = Sci.SCMOD_CTRL
+    val shift = Sci.SCMOD_SHIFT
+    eq("Ctrl+Shift+S", Shortcuts.label(KeyBinding(ctrl or shift, 'S'.code)), "shortcut label")
+    eq("Ctrl+Alt+Shift+F12", Shortcuts.label(KeyBinding(ctrl or shift or Sci.SCMOD_ALT, Shortcuts.FUNCTION + 12)), "shortcut label with every modifier")
+    eq("F3", Shortcuts.label(KeyBinding(0, Shortcuts.FUNCTION + 3)), "function key label")
+    eq("Ctrl+Page Down", Shortcuts.label(KeyBinding(ctrl, Sci.SCK_NEXT)), "named key label")
+    eq("", Shortcuts.label(null), "no shortcut has no label")
+    ok(Shortcuts.usable(KeyBinding(0, Shortcuts.FUNCTION + 5)), "a function key alone is a usable shortcut")
+    ok(!Shortcuts.usable(KeyBinding(shift, 'A'.code)), "a letter needs Ctrl or Alt")
+    ok(Shortcuts.usable(KeyBinding(Sci.SCMOD_ALT, 'A'.code)), "Alt and a letter is usable")
+
+    val defaults = mapOf(
+        "save" to KeyBinding(ctrl, 'S'.code), "find" to KeyBinding(ctrl, 'F'.code),
+        "record" to KeyBinding(ctrl or shift, 'R'.code), "stop" to KeyBinding(ctrl or shift, 'R'.code),
+    )
+    val table = ShortcutTable(defaults)
+    eq(listOf("save"), table.commands(ctrl, 'S'.code), "default shortcut found")
+    eq(listOf("record", "stop"), table.commands(ctrl or shift, 'R'.code), "two commands may share a default shortcut")
+    eq(emptyList<String>(), table.commands(ctrl, 'X'.code), "unused shortcut")
+    ok(!table.hasChanges, "a fresh table has no changes")
+    eq(listOf("save"), table.assign("upper", KeyBinding(ctrl, 'S'.code)), "assigning a taken shortcut names the loser")
+    eq(listOf("upper"), table.commands(ctrl, 'S'.code), "the shortcut now runs the new command")
+    eq(null, table.binding("save"), "the old command lost it")
+    ok(table.isCustom("save") && table.isCustom("upper") && !table.isCustom("find"), "changed commands are marked")
+    val saved = table.encode()
+    val restored = ShortcutTable(defaults).apply { decode(saved) }
+    eq(listOf("upper"), restored.commands(ctrl, 'S'.code), "changes survive saving")
+    eq(null, restored.binding("save"), "a removed shortcut survives saving")
+    eq(KeyBinding(ctrl, 'F'.code), restored.binding("find"), "untouched defaults stay")
+    restored.reset("save")
+    eq(KeyBinding(ctrl, 'S'.code), restored.binding("save"), "reset restores the default")
+    table.assign("save", KeyBinding(ctrl, 'S'.code))
+    ok(!table.isCustom("save"), "assigning the default again is no change")
+    eq(null, table.binding("upper"), "and takes the shortcut back")
+    table.assign("find", null)
+    eq(null, table.binding("find"), "a shortcut can be removed")
+    table.resetAll()
+    ok(!table.hasChanges && table.binding("find") == KeyBinding(ctrl, 'F'.code), "reset all")
+    ShortcutTable(defaults).apply { decode("garbage\n\n1\t2\n") }.let { ok(!it.hasChanges, "unreadable shortcut lines are skipped") }
+
+    // Preferences.
+    val sci = HostSci()
+    EditorOptions(tabSize = 8, useSpaces = true, highlightCurrentLine = false, caret = 3, caretBlinks = false, scrollBeyondLastLine = true, edgeColumn = 100)
+        .apply(sci, 2f)
+    eq(8L, sci.send(Sci.SCI_GETTABWIDTH), "tab size")
+    eq(0L, sci.send(Sci.SCI_GETUSETABS), "tabs replaced by spaces")
+    eq(0L, sci.send(Sci.SCI_GETCARETLINEVISIBLE), "current line not highlighted")
+    eq(6L, sci.send(Sci.SCI_GETCARETWIDTH), "thick caret, in device pixels")
+    eq(0L, sci.send(Sci.SCI_GETCARETPERIOD), "caret does not blink")
+    eq(0L, sci.send(Sci.SCI_GETENDATLASTLINE), "scrolling beyond the last line")
+    eq(Sci.EDGE_LINE.toLong(), sci.send(Sci.SCI_GETEDGEMODE), "edge line shown")
+    eq(100L, sci.send(Sci.SCI_GETEDGECOLUMN), "edge column")
+    sci.text = "ab"
+    sci.send(Sci.SCI_SETSEL, 1, 1)
+    sci.send(Sci.SCI_TAB)
+    eq("a       b", sci.text, "the Tab key fills up to the tab stop with spaces")
+    EditorOptions(caret = 4).apply(sci, 2f)
+    eq(Sci.CARETSTYLE_BLOCK.toLong(), sci.send(Sci.SCI_GETCARETSTYLE), "block caret")
+    eq(4L, sci.send(Sci.SCI_GETTABWIDTH), "default tab size")
+    eq(1L, sci.send(Sci.SCI_GETUSETABS), "default keeps tabs")
+    eq(Sci.EDGE_NONE.toLong(), sci.send(Sci.SCI_GETEDGEMODE), "no edge line by default")
+
+    // Style Configurator.
+    val overrides = StyleOverrides()
+    ok(theme.with(overrides) === theme, "no changes leaves the theme alone")
+    val keyword = theme.lexerStyles("cpp").first { it.name == "INSTRUCTION WORD" }
+    overrides.set("cpp", "INSTRUCTION WORD", StyleChange(fg = 0x123456, fontStyle = 2))
+    overrides.set("", "Default Style", StyleChange(bg = 0x101010))
+    val changed = theme.with(overrides)
+    val changedKeyword = changed.lexerStyles("cpp").first { it.name == "INSTRUCTION WORD" }
+    eq(0x123456, changedKeyword.fg, "changed foreground")
+    eq(keyword.bg, changedKeyword.bg, "background left as the theme has it")
+    ok(changedKeyword.italic && !changedKeyword.bold, "changed font style")
+    eq(keyword.styleId, changedKeyword.styleId, "the style keeps its number")
+    eq(0x101010, changed.background, "changed default background")
+    ok(changed.isDark && !theme.isDark, "a dark background makes the theme count as dark")
+    eq(theme.lexerStyles("python"), changed.lexerStyles("python"), "other languages are untouched")
+    val again = StyleOverrides.decode(overrides.encode())
+    eq(StyleChange(fg = 0x123456, fontStyle = 2), again.get("cpp", "INSTRUCTION WORD"), "style changes survive saving")
+    eq(StyleChange(bg = 0x101010), again.get("", "Default Style"), "global style changes survive saving")
+    again.set("cpp", "INSTRUCTION WORD", null)
+    again.set("", "Default Style", StyleChange())
+    ok(again.isEmpty, "resetting every style leaves nothing")
+    ok(StyleOverrides.decode("nonsense").isEmpty, "unreadable style changes are skipped")
+    val plan = LanguageSetup.plan(registry.byName("cpp")!!, registry, changed)
+    ThemeApplier.apply(sci, changed, plan, ViewMetrics())
+    eq(ThemeApplier.sciColour(0x123456), sci.send(Sci.SCI_STYLEGETFORE, keyword.styleId.toLong()), "the editor shows the changed colour")
+    eq(1L, sci.send(Sci.SCI_STYLEGETITALIC, keyword.styleId.toLong()), "and the changed font style")
 }
 
 fun main(args: Array<String>) {
@@ -722,6 +827,7 @@ fun main(args: Array<String>) {
     testTransforms()
     testMoreEditOps()
     testSession()
+    testSettings(registry, theme)
     println("core: ${checks - failures}/$checks checks passed")
     exitProcess(if (failures == 0) 0 else 1)
 }

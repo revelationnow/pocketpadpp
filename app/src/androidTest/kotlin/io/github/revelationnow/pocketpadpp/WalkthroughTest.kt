@@ -18,6 +18,8 @@ import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
+import io.github.revelationnow.pocketpadpp.core.Eol
+import io.github.revelationnow.pocketpadpp.core.KeyBinding
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
 import io.github.revelationnow.pocketpadpp.editor.ScintillaView
@@ -25,6 +27,7 @@ import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -1641,6 +1644,267 @@ class WalkthroughTest {
         assertTrue("the saved macro is still there after a restart", onScreen("Dash"))
         shot("macro-menu")
         tapDescribed("Close menu")
+    }
+
+    @Test
+    fun pinnedTabsMonitoringRunAndPrint() {
+        fun names() = onUi { activity -> activity.workspace.docs.map { it.name } }
+        fun pinned() = onUi { activity -> activity.workspace.docs.filter { it.pinned }.map { it.name } }
+        val first = File(context.cacheDir, "first.txt").apply { writeText("one\n") }
+        val log = File(context.cacheDir, "app.log").apply { writeText("started\n") }
+        onUi { it.openUris(listOf(Uri.fromFile(first), Uri.fromFile(log))) }
+        waitUntil("the files to open") { onUi { it.workspace.active.name } == "app.log" }
+        tap("New")
+        val untitled = onUi { it.workspace.active.name }
+
+        // Pinning moves a tab to the front and marks it.
+        find("app.log").click()
+        device.waitForIdle()
+        openMenu("View", "Tab", "Pin Tab")
+        assertEquals("app.log", names().first())
+        assertEquals(listOf("app.log"), pinned())
+        assertTrue("the pinned tab shows a pin", device.wait(Until.hasObject(By.text(Pattern.compile(".*\\uD83D\\uDCCC.*app\\.log"))), 3000) == true)
+        shot("tab-pinned")
+        openMenu("File", "Close Multiple Documents", "Close All but Pinned Documents")
+        assertEquals("only the pinned tab is left", listOf("app.log"), names())
+        assertTrue(untitled !in names())
+
+        // Monitoring: the file is read-only here and follows what another program writes to it.
+        openMenu("View", "Monitoring (tail -f)")
+        assertEquals("read-only while monitoring", 1L, sci(Sci.SCI_GETREADONLY))
+        SystemClock.sleep(1100)
+        log.appendText("request 1\nrequest 2\n")
+        waitUntil("the new lines to show up", 12000) { text() == "started\nrequest 1\nrequest 2\n" }
+        assertEquals("the caret follows the end of the file", sci(Sci.SCI_GETLENGTH), sci(Sci.SCI_GETCURRENTPOS))
+        assertEquals(1L, sci(Sci.SCI_GETREADONLY))
+        shot("monitoring")
+        openMenu("View", "Monitoring (tail -f)")
+        assertEquals("editable again", 0L, sci(Sci.SCI_GETREADONLY))
+
+        // Pinned tabs are remembered.
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        device.waitForIdle()
+        waitUntil("the session to come back") { names().contains("app.log") }
+        assertEquals(listOf("app.log"), pinned())
+
+        // Binary copy and paste keep NUL characters.
+        onUi {
+            it.editor.send(Sci.SCI_CLEARALL)
+            it.editor.sendBytes(Sci.SCI_ADDTEXT, 3, byteArrayOf(65, 0, 66))
+            it.editor.send(Sci.SCI_SELECTALL)
+        }
+        openMenu("Edit", "Paste Special", "Copy Binary Content")
+        sci(Sci.SCI_DOCUMENTEND)
+        openMenu("Edit", "Paste Special", "Paste Binary Content")
+        assertEquals(6L, sci(Sci.SCI_GETLENGTH))
+        assertEquals("the NUL character came along", 0L, sci(Sci.SCI_GETCHARAT, 4))
+        assertEquals(66L, sci(Sci.SCI_GETCHARAT, 5))
+        sci(Sci.SCI_SETSAVEPOINT)
+
+        // Run: an address with the word at the caret filled in.
+        openMenu("Run", "Run...")
+        assertTrue(device.wait(Until.hasObject(By.desc("Address to open")), 4000) == true)
+        device.findObject(By.desc("Address to open")).text = "https://example.org/?q=\$(CURRENT_WORD)"
+        shot("run-dialog")
+        tapButton("Cancel")
+
+        // Print hands the document to Android's print screen.
+        openMenu("File", "Print...")
+        val printing = device.wait(Until.hasObject(By.pkg("com.android.printspooler")), 15000) == true
+        shot("print")
+        assertTrue("Android's print screen opened", printing)
+        device.pressBack()
+        device.wait(Until.hasObject(By.pkg(context.packageName)), 8000)
+        if (device.hasObject(By.pkg("com.android.printspooler"))) {
+            device.pressBack()
+            device.wait(Until.hasObject(By.pkg(context.packageName)), 8000)
+        }
+    }
+
+    @Test
+    fun preferencesAndShortcutMapper() {
+        fun soft(text: String) = onUi { it.editor.onCreateInputConnection(EditorInfo())!!.commitText(text, 1) }
+        fun binding(id: String) = onUi { it.shortcutTable.binding(id) }
+        fun press(keyCode: Int, meta: Int) {
+            val now = SystemClock.uptimeMillis()
+            instrumentation.sendKeySync(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0, meta))
+            instrumentation.sendKeySync(KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0, meta))
+            device.waitForIdle()
+        }
+        assertEquals("every built-in shortcut belongs to a command in the menus", emptyList<String>(), onUi { it.unknownShortcutCommands() })
+
+        // Preferences: editing options reach the editor at once.
+        setText("\tint x;", "cpp")
+        openMenu("Settings", "Preferences...")
+        menu("Editing")
+        menu("Tab Size")
+        menu("8")
+        assertEquals(8L, sci(Sci.SCI_GETTABWIDTH))
+        tapDescribed("Back")
+        menu("Replace Tabs by Spaces")
+        assertEquals(0L, sci(Sci.SCI_GETUSETABS))
+        menu("Highlight Current Line")
+        assertEquals(0L, sci(Sci.SCI_GETCARETLINEVISIBLE))
+        menu("Vertical Edge")
+        menu("Column 80")
+        assertEquals(80L, sci(Sci.SCI_GETEDGECOLUMN))
+        assertEquals(Sci.EDGE_LINE.toLong(), sci(Sci.SCI_GETEDGEMODE))
+        tapDescribed("Back")
+        menu("Caret")
+        menu("Block")
+        assertEquals(Sci.CARETSTYLE_BLOCK.toLong(), sci(Sci.SCI_GETCARETSTYLE))
+        tapDescribed("Back")
+        shot("preferences-editing")
+        tapDescribed("Back")
+        menu("New Document")
+        menu("Line Ending")
+        menu("Windows (CR LF)")
+        tapDescribed("Back")
+        menu("Encoding")
+        menu("UTF-8-BOM")
+        tapDescribed("Close menu")
+        tap("New")
+        assertEquals("new documents use the chosen line ending", Eol.CRLF.sciMode.toLong(), sci(Sci.SCI_GETEOLMODE))
+        assertTrue(onScreen("CRLF"))
+        assertTrue("and the chosen encoding", onScreen("UTF-8-BOM"))
+        assertEquals("the tab size holds for every tab", 8L, sci(Sci.SCI_GETTABWIDTH))
+        tap("Tab")
+        assertEquals("the Tab key gives spaces", "        ", text())
+        shot("preferences-new-document")
+
+        // Shortcut Mapper: give UPPERCASE a shortcut by pressing it on a keyboard.
+        openMenu("Settings", "Shortcut Mapper...")
+        menu("Edit")
+        menu("Convert Case to")
+        menu("UPPERCASE")
+        assertTrue("the shortcut dialog opened", device.wait(Until.hasObject(By.desc("Key")), 4000) == true)
+        press(KeyEvent.KEYCODE_U, KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON)
+        shot("shortcut-dialog")
+        tapButton("OK")
+        assertEquals(KeyBinding(Sci.SCMOD_CTRL or Sci.SCMOD_ALT, 'U'.code), binding("Edit > Convert Case to > UPPERCASE"))
+        assertTrue("the mapper lists the new shortcut", onScreen("Ctrl+Alt+U"))
+        shot("shortcut-mapper")
+
+        // A shortcut that is taken can be moved over.
+        menu("lowercase")
+        device.wait(Until.hasObject(By.desc("Key")), 4000)
+        press(KeyEvent.KEYCODE_S, KeyEvent.META_CTRL_ON)
+        tapButton("OK")
+        assertTrue("the clash is pointed out", onScreen("Ctrl+S is taken"))
+        shot("shortcut-taken")
+        tapButton("Reassign")
+        assertEquals(KeyBinding(Sci.SCMOD_CTRL, 'S'.code), binding("Edit > Convert Case to > lowercase"))
+        assertNull("Save gave it up", binding("File > Save"))
+        tapDescribed("Close menu")
+
+        // The new shortcuts work from the on-screen Ctrl and Alt keys.
+        setText("Mixed Case")
+        sci(Sci.SCI_SELECTALL)
+        tap("Ctrl")
+        tap("Alt")
+        soft("u")
+        assertEquals("MIXED CASE", text())
+        sci(Sci.SCI_SELECTALL)
+        tap("Ctrl")
+        soft("s")
+        assertEquals("mixed case", text())
+
+        // Everything is still there after a restart.
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        device.waitForIdle()
+        assertEquals(8L, sci(Sci.SCI_GETTABWIDTH))
+        assertEquals(0L, sci(Sci.SCI_GETUSETABS))
+        assertEquals(80L, sci(Sci.SCI_GETEDGECOLUMN))
+        assertEquals(KeyBinding(Sci.SCMOD_CTRL or Sci.SCMOD_ALT, 'U'.code), binding("Edit > Convert Case to > UPPERCASE"))
+        assertNull(binding("File > Save"))
+
+        // The menus show the shortcuts, and the mapper can put them all back.
+        tapDescribed("Menu")
+        menu("File")
+        assertTrue("menus show their shortcuts", onScreen("Ctrl+N"))
+        shot("menu-shortcut-hints")
+        tapDescribed("Close menu")
+        openMenu("Settings", "Shortcut Mapper...")
+        menu("Reset All Shortcuts")
+        tapDescribed("Close menu")
+        assertEquals(KeyBinding(Sci.SCMOD_CTRL, 'S'.code), binding("File > Save"))
+        assertNull(binding("Edit > Convert Case to > UPPERCASE"))
+        onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
+    }
+
+    @Test
+    fun styleConfiguratorThemesAndSelectionMenu() {
+        setText("int main() { return 0; }", "cpp")
+        val keyword = 5L
+        val original = sci(Sci.SCI_STYLEGETFORE, keyword)
+
+        // Style Configurator: change one colour of the current language.
+        openMenu("Settings", "Style Configurator...")
+        shot("style-configurator")
+        menu("C++")
+        menu("INSTRUCTION WORD")
+        device.wait(Until.findObject(By.desc("Foreground colour")), 4000)!!.text = "FF0000"
+        device.waitForIdle()
+        shot("style-dialog")
+        tapButton("OK")
+        assertEquals("keywords are red now (Scintilla keeps colours as BGR)", 0x0000FFL, sci(Sci.SCI_STYLEGETFORE, keyword))
+        shot("style-changed")
+        tapDescribed("Close menu")
+
+        // The change belongs to the theme and is kept.
+        scenario.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        device.waitForIdle()
+        setText("int main() { return 0; }", "cpp")
+        assertEquals(0x0000FFL, sci(Sci.SCI_STYLEGETFORE, keyword))
+        openMenu("Settings", "Style Configurator...")
+        menu("C++")
+        menu("INSTRUCTION WORD")
+        tapButton("Reset")
+        assertEquals("reset brings the theme's colour back", original, sci(Sci.SCI_STYLEGETFORE, keyword))
+        tapDescribed("Back")
+        menu("Font")
+        menu("Serif")
+        shot("font-serif")
+        menu("Monospace")
+        tapDescribed("Close menu")
+
+        // A Notepad++ theme file can be imported and then picked like the built-in ones.
+        val zenburn = context.assets.open("npp/themes/Zenburn.xml").use { it.readBytes() }
+        try {
+            assertEquals("My Theme.xml", onUi { it.importTheme("My Theme.xml", zenburn) })
+            assertNull("other files are turned down", onUi { it.importTheme("notes.xml", "<notes/>".toByteArray()) })
+            openMenu("Settings", "Theme", "My Theme")
+            assertTrue("the imported theme is in use", onUi { it.workspace.theme.isDark })
+            shot("imported-theme")
+            tapDescribed("Back")
+            menu("Theme")
+            menu("Default (stylers.xml)")
+            tapDescribed("Close menu")
+        } finally {
+            File(context.filesDir, "themes").deleteRecursively()
+        }
+
+        // Extra commands for the selection toolbar.
+        openMenu("Settings", "Selection Menu Items...")
+        tap("UPPERCASE")
+        tap("Comment")
+        shot("selection-menu-items")
+        tapButton("OK")
+        assertEquals(listOf("UPPERCASE", "Comment"), onUi { activity -> activity.editor.extraActions.map { it.first } })
+        setText("word here", "cpp")
+        sci(Sci.SCI_SETSEL, 0, 4)
+        onUi { it.editor.extraActions[0].second() }
+        assertEquals("WORD here", text())
+        onUi { it.editor.extraActions[1].second() }
+        assertEquals("// WORD here", text())
+        val (x, y) = pointOf(3)
+        longPressAt(x, y)
+        shot("selection-toolbar")
+        device.pressBack()
+        onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
     }
 
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */

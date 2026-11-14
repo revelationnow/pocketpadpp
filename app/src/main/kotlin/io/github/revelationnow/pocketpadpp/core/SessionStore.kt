@@ -23,6 +23,7 @@ data class SessionEntry(
     val untitledNumber: Int = 0,
     /** 0 for none, or 1 to 5 for one of the tab colours. */
     val tabColour: Int = 0,
+    val pinned: Boolean = false,
 )
 
 data class Session(val activeIndex: Int, val entries: List<SessionEntry>)
@@ -65,6 +66,7 @@ object SessionStore {
             attribute("firstVisibleLine", e.firstVisibleLine)
             attribute("xOffset", e.xOffset)
             attribute("tabColourId", e.tabColour)
+            attribute("tabPinned", if (e.pinned) "yes" else "no")
             attribute("backupFilePath", e.backup)
             attribute("untitled", e.untitledNumber)
             append(" />\n")
@@ -92,6 +94,7 @@ object SessionStore {
                             firstVisibleLine = a.getValue("firstVisibleLine")?.toLongOrNull() ?: 0,
                             xOffset = a.getValue("xOffset")?.toIntOrNull() ?: 0,
                             tabColour = a.getValue("tabColourId")?.toIntOrNull()?.coerceIn(0, 5) ?: 0,
+                            pinned = a.getValue("tabPinned") in setOf("yes", "1", "true"),
                             backup = a.getValue("backupFilePath"),
                             untitledNumber = a.getValue("untitled")?.toIntOrNull() ?: 0,
                         )

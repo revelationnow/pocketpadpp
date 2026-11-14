@@ -48,6 +48,13 @@ class Doc(val id: Long, internal val sciDoc: Long, var language: Language) {
     /** 0 for none, or 1 to 5: the colour given to the tab with View > Tab > Apply Colour. */
     var colour = 0
 
+    /** Pinned tabs stay at the start of the tab bar and survive Close All but Pinned. */
+    var pinned = false
+
+    /** View > Monitoring (tail -f): the file is watched and shown again whenever it changes. */
+    var monitoring = false
+    internal var monitorStamp = 0L
+
     /** Size as UTF-8 and the file's modification time when it was opened or saved, for Window > Sort By. */
     var length = 0L
     var modified = 0L
@@ -70,6 +77,23 @@ class LoadedFile(val name: String, val utf8: ByteArray, val encoding: TextEncodi
 object FileIo {
     /** Refuse files that would not fit comfortably in memory several times over. */
     const val MAX_FILE_BYTES = 64L * 1024 * 1024
+
+    /** A number that changes when the file does: its modification time and size together. */
+    fun stamp(context: Context, uri: Uri): Long {
+        try {
+            if (uri.scheme == "file") {
+                val file = java.io.File(uri.path ?: return 0)
+                return file.lastModified() * 31 + file.length()
+            }
+            val columns = arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED, OpenableColumns.SIZE)
+            context.contentResolver.query(uri, columns, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) return (if (cursor.isNull(0)) 0 else cursor.getLong(0)) * 31 + (if (cursor.isNull(1)) 0 else cursor.getLong(1))
+            }
+        } catch (e: Exception) {
+            // Treated as unchanged.
+        }
+        return 0
+    }
 
     /** When the file was last changed, in milliseconds, or 0 when its provider does not say. */
     fun lastModified(context: Context, uri: Uri): Long {
@@ -166,6 +190,13 @@ class Workspace(
     /** Called when tabs are added, removed, renamed, switched or change their modified state. */
     var onTabsChanged: (() -> Unit)? = null
 
+    /** Called whenever a tab has been given its language and theme, which is when it is shown. */
+    var afterStyle: (() -> Unit)? = null
+
+    /** Settings > Preferences > New Document. */
+    var newDocumentEol: Eol = Eol.LF
+    var newDocumentEncoding: TextEncoding = TextEncodings.UTF8
+
     private var nextId = 1L
     private val backupDir = File(context.filesDir, "backup").apply { mkdirs() }
     private val sessionFile = File(context.filesDir, "session.xml")
@@ -216,8 +247,11 @@ class Workspace(
             untitledNumber = number
             name = "new $number"
         }
+        doc.encoding = newDocumentEncoding
         activate(doc)
+        editor.send(Sci.SCI_SETEOLMODE, newDocumentEol.sciMode.toLong())
         EditOps.enableChangeHistory(editor)
+        onTabsChanged?.invoke()
         return doc
     }
 
@@ -279,6 +313,13 @@ class Workspace(
         onTabsChanged?.invoke()
     }
 
+    /** View > Tab > Pin Tab: pinned tabs gather at the start of the tab bar, in the order they had. */
+    fun setPinned(doc: Doc, pinned: Boolean) {
+        doc.pinned = pinned
+        docs.sortWith(compareByDescending { it.pinned })
+        onTabsChanged?.invoke()
+    }
+
     /** Edit > Set / Clear Read-Only for All Documents. */
     fun setReadOnlyAll(readOnly: Boolean) {
         for (doc in docs) doc.pendingReadOnly = if (doc === active) null else readOnly
@@ -329,6 +370,7 @@ class Workspace(
             else -> Sci.SC_IV_LOOKBOTH
         }
         editor.send(Sci.SCI_SETINDENTATIONGUIDES, guides.toLong())
+        afterStyle?.invoke()
     }
 
     fun setLanguage(language: Language) {
@@ -485,6 +527,7 @@ class Workspace(
                 firstVisibleLine = doc.firstDocLine,
                 xOffset = doc.xOffset.toInt(),
                 tabColour = doc.colour,
+                pinned = doc.pinned,
                 backup = if (withBackups) doc.backupName else null,
                 untitledNumber = doc.untitledNumber,
             )
@@ -557,6 +600,7 @@ class Workspace(
         doc.firstDocLine = entry.firstVisibleLine
         doc.xOffset = entry.xOffset.toLong()
         doc.colour = entry.tabColour
+        doc.pinned = entry.pinned
         restoreViewState(doc)
         onTabsChanged?.invoke()
         return doc

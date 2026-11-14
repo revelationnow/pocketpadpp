@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
 /** The row of document tabs. */
 class TabStrip(context: Context, private val palette: Palette) : HorizontalScrollView(context) {
 
-    class Tab(val title: String, val dirty: Boolean, val active: Boolean, val colour: Int = 0)
+    class Tab(val title: String, val dirty: Boolean, val active: Boolean, val colour: Int = 0, val pinned: Boolean = false)
 
     var onSelect: ((Int) -> Unit)? = null
     var onClose: ((Int) -> Unit)? = null
@@ -48,7 +48,7 @@ class TabStrip(context: Context, private val palette: Palette) : HorizontalScrol
             }
             item.addView(TextView(context).apply {
                 // Notepad++ marks unsaved tabs with a red icon; a red dot does the same job here.
-                text = if (tab.dirty) "● ${tab.title}" else tab.title
+                text = (if (tab.pinned) "\uD83D\uDCCC " else "") + (if (tab.dirty) "● ${tab.title}" else tab.title)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 setTextColor(if (tab.dirty) palette.tabDirty else if (tab.active) palette.tabActiveText else palette.tabInactiveText)
                 setTypeface(typeface, if (tab.active) Typeface.BOLD else Typeface.NORMAL)

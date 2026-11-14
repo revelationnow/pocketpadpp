@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
@@ -38,6 +39,13 @@ import io.github.revelationnow.pocketpadpp.app.MenuSpec
 import io.github.revelationnow.pocketpadpp.app.TabStrip
 import io.github.revelationnow.pocketpadpp.app.Workspace
 import io.github.revelationnow.pocketpadpp.core.EditOps
+import io.github.revelationnow.pocketpadpp.core.EditorOptions
+import io.github.revelationnow.pocketpadpp.core.KeyBinding
+import io.github.revelationnow.pocketpadpp.core.ShortcutTable
+import io.github.revelationnow.pocketpadpp.core.Shortcuts
+import io.github.revelationnow.pocketpadpp.core.StyleChange
+import io.github.revelationnow.pocketpadpp.core.StyleOverrides
+import io.github.revelationnow.pocketpadpp.core.WordStyle
 import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.LanguageRegistry
 import io.github.revelationnow.pocketpadpp.core.Hashes
@@ -51,6 +59,7 @@ import io.github.revelationnow.pocketpadpp.core.MacroStep
 import io.github.revelationnow.pocketpadpp.core.Macros
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.NppTheme
+import io.github.revelationnow.pocketpadpp.core.RunCommand
 import io.github.revelationnow.pocketpadpp.core.TextEncoding
 import io.github.revelationnow.pocketpadpp.core.TextEncodings
 import io.github.revelationnow.pocketpadpp.core.TextTransforms
@@ -107,6 +116,13 @@ class MainActivity : Activity() {
     private val modifierKeys = LinkedHashMap<Int, Button>()
     private lateinit var root: LinearLayout
     private var themeName = ""
+
+    // The theme as its file has it, and what the Style Configurator changed about it.
+    private lateinit var baseTheme: NppTheme
+    private var styleOverrides = StyleOverrides()
+    private var fontName = "monospace"
+    internal var options = EditorOptions()
+    internal val shortcutTable = ShortcutTable(DEFAULT_SHORTCUTS)
     private var fontSize = 13
     private var showLineNumbers = true
     private var shownDirty = false
@@ -128,11 +144,25 @@ class MainActivity : Activity() {
         // The bars and dialogs around the editor are light or dark to match the Notepad++ theme in use,
         // which has to be settled before the window is created.
         themeName = prefs.getString("theme", "") ?: ""
-        val theme = loadTheme(themeName)
+        baseTheme = loadTheme(themeName)
+        styleOverrides = StyleOverrides.decode(prefs.getString("styles:$themeName", "") ?: "")
+        val theme = baseTheme.with(styleOverrides)
         palette = Palette(theme.isDark)
         setTheme(if (palette.dark) R.style.AppTheme_Dark else R.style.AppTheme)
         super.onCreate(savedInstanceState)
         fontSize = prefs.getInt("fontSize", 13)
+        fontName = prefs.getString("fontName", "monospace") ?: "monospace"
+        options = EditorOptions(
+            tabSize = prefs.getInt("tabSize", 4),
+            useSpaces = prefs.getBoolean("useSpaces", false),
+            autoIndent = prefs.getBoolean("autoIndent", true),
+            highlightCurrentLine = prefs.getBoolean("currentLine", true),
+            caret = prefs.getInt("caret", 2),
+            caretBlinks = prefs.getBoolean("caretBlinks", true),
+            scrollBeyondLastLine = prefs.getBoolean("scrollBeyond", false),
+            edgeColumn = prefs.getInt("edgeColumn", 0),
+        )
+        shortcutTable.decode(prefs.getString("shortcuts", "") ?: "")
         showLineNumbers = prefs.getBoolean("lineNumbers", true)
 
         editor = ScintillaView(this)
@@ -143,24 +173,31 @@ class MainActivity : Activity() {
             assets.open("npp/langs.model.xml").use { xml -> LanguageRegistry.load(table, xml) }
         }
 
-        editor.send(Sci.SCI_SETTABWIDTH, 4)
         editor.send(Sci.SCI_SETWRAPMODE, (if (prefs.getBoolean("wrap", false)) Sci.SC_WRAP_WORD else Sci.SC_WRAP_NONE).toLong())
         editor.keyboardMode = if (prefs.getBoolean("textKeyboard", false)) ScintillaView.KeyboardMode.TEXT else ScintillaView.KeyboardMode.CODE
 
         workspace = Workspace(this, editor, languages, theme) {
             ViewMetrics(
-                fontSize = fontSize, foldMarginWidth = dp(22f), leftPadding = dp(4f),
+                fontName = fontName, fontSize = fontSize, foldMarginWidth = dp(22f), leftPadding = dp(4f),
                 showLineNumbers = showLineNumbers, pixelScale = resources.displayMetrics.density,
             )
         }
         workspace.onTabsChanged = { refreshTabs() }
+        workspace.afterStyle = { options.apply(editor, resources.displayMetrics.density) }
+        workspace.newDocumentEol = Eol.fromSciMode(prefs.getInt("newEol", Eol.LF.sciMode))
+        workspace.newDocumentEncoding = TextEncodings.byId(prefs.getString("newEncoding", null)) ?: TextEncodings.UTF8
+        // The tab the app starts with was made before these settings were read.
+        workspace.active.encoding = workspace.newDocumentEncoding
+        editor.send(Sci.SCI_SETEOLMODE, workspace.newDocumentEol.sciMode.toLong())
+        options.apply(editor, resources.displayMetrics.density)
+        applySelectionMenu()
 
         editor.onStateChanged = { onEditorStateChanged() }
         editor.onTextChanged = { workspace.textChanged() }
         editor.onCharAdded = { ch ->
             // Auto-indent happens again on playback, so what it does is not part of a macro.
             macroPaused = true
-            EditOps.autoIndent(editor, ch)
+            if (options.autoIndent) EditOps.autoIndent(editor, ch)
             macroPaused = false
         }
         editor.onMacroStep = { message, wParam, lParam, text ->
@@ -408,75 +445,27 @@ class MainActivity : Activity() {
      * Scintilla's own key map, which has the editing shortcuts (Ctrl+Z, Y, X, C, V, A, D, L, T, U...).
      */
     private fun shortcut(key: Int, modifiers: Int): Boolean {
-        val ctrl = Sci.SCMOD_CTRL
-        val alt = Sci.SCMOD_ALT
-        val shift = Sci.SCMOD_SHIFT
-        val language = workspace.active.language
+        // The shortcut mapper's table first. Commands that share a shortcut take turns by which one is available,
+        // which is how one key both starts and stops recording.
+        val bound = shortcutTable.commands(modifiers, key)
+        if (bound.isNotEmpty()) {
+            bound.firstOrNull { runCommand(it) }
+            updateStatus()
+            return true
+        }
         val docs = workspace.docs
         val index = docs.indexOf(workspace.active)
-        fun f(n: Int) = ScintillaView.KEY_FUNCTION + n
         when (modifiers) {
-            0 -> when (key) {
-                f(2) -> goToBookmark(forward = true)
-                f(3) -> findBar.find(forward = true)
-                f(4) -> results.step(forward = true)
-                f(7) -> if (results.isOpen) results.close() else results.show()
+            Sci.SCMOD_CTRL -> when (key) {
+                Sci.SCK_TAB -> workspace.activate(docs[(index + 1) % docs.size])
                 else -> return false
             }
-            shift -> when (key) {
-                f(4) -> results.step(forward = false)
-                f(2) -> goToBookmark(forward = false)
-                f(3) -> findBar.find(forward = false)
-                else -> return false
-            }
-            ctrl -> when (key) {
-                'N'.code -> workspace.newDocument()
-                'O'.code -> openFiles()
-                'S'.code -> save()
-                'W'.code -> requestClose(workspace.active)
-                'F'.code -> findBar.open(withReplace = false)
-                'H'.code -> findBar.open(withReplace = true)
-                'G'.code -> goToLine()
-                'B'.code -> EditOps.goToMatchingBrace(editor)
-                'Q'.code -> EditOps.toggleLineComment(editor, language.commentLine)
-                'K'.code -> EditOps.setLineComment(editor, language.commentLine, comment = true)
-                'J'.code -> EditOps.joinLines(editor)
-                'I'.code -> EditOps.splitLines(editor)
-                Sci.SCK_TAB, Sci.SCK_NEXT -> workspace.activate(docs[(index + 1) % docs.size])
-                Sci.SCK_PRIOR -> workspace.activate(docs[(index + docs.size - 1) % docs.size])
-                Sci.SCK_ADD -> zoom { editor.send(Sci.SCI_ZOOMIN) }
-                Sci.SCK_SUBTRACT -> zoom { editor.send(Sci.SCI_ZOOMOUT) }
-                Sci.SCK_DIVIDE -> zoom { editor.send(Sci.SCI_SETZOOM, 0) }
-                f(2) -> toggleBookmark()
-                f(3) -> findBar.findSelection(forward = true, remember = true)
-                else -> return false
-            }
-            ctrl or shift -> when (key) {
-                'S'.code -> saveAll()
-                'R'.code -> if (recording) stopRecording() else startRecording()
-                'P'.code -> if (!recording && currentMacro.isNotEmpty()) Macros.play(editor, currentMacro.toList())
-                'F'.code -> findInFilesDialog()
-                'W'.code -> closeMany(docs.toList())
-                'Q'.code -> EditOps.streamComment(editor, language.commentStart, language.commentEnd)
-                'K'.code -> EditOps.setLineComment(editor, language.commentLine, comment = false)
+            Sci.SCMOD_CTRL or Sci.SCMOD_SHIFT -> when (key) {
                 Sci.SCK_TAB -> workspace.activate(docs[(index + docs.size - 1) % docs.size])
-                Sci.SCK_UP -> editor.send(Sci.SCI_MOVESELECTEDLINESUP)
-                Sci.SCK_DOWN -> editor.send(Sci.SCI_MOVESELECTEDLINESDOWN)
-                f(3) -> findBar.findSelection(forward = false, remember = true)
-                else -> return false
-            }
-            ctrl or alt -> when (key) {
-                'S'.code -> saveAs(copy = false)
-                'F'.code -> EditOps.foldCurrent(editor, collapse = true)
-                else -> return false
-            }
-            ctrl or alt or shift -> when (key) {
-                'F'.code -> EditOps.foldCurrent(editor, collapse = false)
-                'B'.code -> EditOps.selectBetweenBraces(editor)
                 else -> return false
             }
             // Alt and a letter opens that menu, as on Windows.
-            alt -> when (key) {
+            Sci.SCMOD_ALT -> when (key) {
                 'F'.code -> showMainMenu("File")
                 'E'.code -> showMainMenu("Edit")
                 'S'.code -> showMainMenu("Search")
@@ -486,15 +475,8 @@ class MainActivity : Activity() {
                 'T'.code -> showMainMenu("Settings")
                 'O'.code -> showMainMenu("Tools")
                 'M'.code -> showMainMenu("Macro")
+                'R'.code -> showMainMenu("Run")
                 'W'.code -> showMainMenu("Window")
-                'C'.code -> columnEditor()
-                '0'.code -> editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_CONTRACT.toLong())
-                in '1'.code..'8'.code -> EditOps.foldLevel(editor, key - '0'.code, collapse = true)
-                else -> return false
-            }
-            alt or shift -> when (key) {
-                '0'.code -> editor.send(Sci.SCI_FOLDALL, Sci.SC_FOLDACTION_EXPAND.toLong())
-                in '1'.code..'8'.code -> EditOps.foldLevel(editor, key - '0'.code, collapse = false)
                 else -> return false
             }
             else -> return false
@@ -502,6 +484,176 @@ class MainActivity : Activity() {
         updateStatus()
         return true
     }
+
+    // region Commands by name: what the shortcut mapper and the selection menu work with
+
+    /** The entries of one menu level, found by the labels leading to it. Entries that come and go are left out. */
+    private fun entriesAt(path: List<String>): List<MenuSpec.Entry> {
+        var spec = MenuSpec().apply { cataloguing = true; mainMenu() }
+        for (segment in path) {
+            val children = spec.entries.firstOrNull { it.id == segment && it.children != null }?.children ?: return emptyList()
+            spec = MenuSpec().apply { cataloguing = true; children() }
+        }
+        return spec.entries
+    }
+
+    private fun commandEntry(id: String): MenuSpec.Entry? {
+        val path = id.split(COMMAND_SEPARATOR)
+        return entriesAt(path.dropLast(1)).firstOrNull { it.id == path.last() && it.action != null }
+    }
+
+    /** Runs a menu command by its place in the menus, such as "Edit > Line Operations > Join Lines". */
+    internal fun runCommand(id: String): Boolean {
+        val entry = commandEntry(id) ?: return false
+        if (!entry.enabled) return false
+        entry.action?.invoke()
+        return true
+    }
+
+    /** Shortcuts that point at a command the menus do not have. Empty unless a menu was renamed without them. */
+    internal fun unknownShortcutCommands(): List<String> = DEFAULT_SHORTCUTS.keys.filter { commandEntry(it) == null }
+
+    private fun showShortcutMapper() = showMenu("Shortcut Mapper") { mapperLevel(emptyList()) }
+
+    private fun MenuSpec.mapperLevel(path: List<String>) {
+        if (path.isEmpty()) {
+            item("Reset All Shortcuts", enabled = shortcutTable.hasChanges, checked = false) {
+                shortcutTable.resetAll()
+                saveShortcuts()
+            }
+        }
+        for (entry in entriesAt(path)) {
+            val full = path + entry.id
+            if (entry.children != null) {
+                sub(entry.label) { mapperLevel(full) }
+            } else {
+                val id = full.joinToString(COMMAND_SEPARATOR)
+                // A tick marks the shortcuts that were changed.
+                item(entry.label, checked = shortcutTable.isCustom(id), hint = Shortcuts.label(shortcutTable.binding(id))) {
+                    shortcutDialog(id, entry.label)
+                }
+            }
+        }
+    }
+
+    private fun saveShortcuts() {
+        prefs.edit().putString("shortcuts", shortcutTable.encode()).apply()
+    }
+
+    private fun shortcutDialog(id: String, name: String) {
+        val current = shortcutTable.binding(id)
+        fun box(label: String, bit: Int) = CheckBox(themed).apply {
+            text = label
+            isChecked = current != null && current.modifiers and bit != 0
+        }
+        val ctrl = box("Ctrl", Sci.SCMOD_CTRL)
+        val alt = box("Alt", Sci.SCMOD_ALT)
+        val shift = box("Shift", Sci.SCMOD_SHIFT)
+        val names = listOf("None") + Shortcuts.KEYS.map { it.first }
+        val keys = Spinner(themed).apply {
+            contentDescription = "Key"
+            adapter = ArrayAdapter(themed, android.R.layout.simple_spinner_dropdown_item, names)
+            setSelection(1 + Shortcuts.KEYS.indexOfFirst { it.second == current?.key })
+        }
+        val container = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(LinearLayout(themed).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(ctrl)
+                addView(alt)
+                addView(shift)
+            })
+            addView(LinearLayout(themed).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(themed).apply { text = "Key  " })
+                addView(keys)
+            })
+            addView(TextView(themed).apply {
+                text = "With a keyboard attached, simply press the shortcut."
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setPadding(0, dp(8f), 0, 0)
+            })
+        }
+        val dialog = AlertDialog.Builder(themed)
+            .setTitle(name)
+            .setView(container)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton("Default") { _, _ ->
+                shortcutTable.reset(id)
+                saveShortcuts()
+                menuSheet?.refresh()
+            }
+            .create()
+        dialog.setOnKeyListener { _, _, event ->
+            val key = ScintillaView.shortcutKeyOf(event)
+            // Plain keys are left to the dialog, which needs Tab, Enter and the arrows for itself.
+            val capture = key != 0 && (event.isCtrlPressed || event.isAltPressed || key > Shortcuts.FUNCTION)
+            if (capture && event.action == android.view.KeyEvent.ACTION_DOWN) {
+                ctrl.isChecked = event.isCtrlPressed
+                alt.isChecked = event.isAltPressed
+                shift.isChecked = event.isShiftPressed
+                keys.setSelection(1 + Shortcuts.KEYS.indexOfFirst { it.second == key })
+            }
+            capture
+        }
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val modifiers = (if (ctrl.isChecked) Sci.SCMOD_CTRL else 0) or (if (alt.isChecked) Sci.SCMOD_ALT else 0) or
+                (if (shift.isChecked) Sci.SCMOD_SHIFT else 0)
+            val chosen = Shortcuts.KEYS.getOrNull(keys.selectedItemPosition - 1)?.let { KeyBinding(modifiers, it.second) }
+            if (chosen != null && !Shortcuts.usable(chosen)) {
+                toast("Add Ctrl or Alt, or pick a function key")
+                return@setOnClickListener
+            }
+            val assign = {
+                shortcutTable.assign(id, chosen)
+                saveShortcuts()
+                dialog.dismiss()
+                menuSheet?.refresh()
+            }
+            val others = if (chosen == null) emptyList() else shortcutTable.commands(chosen.modifiers, chosen.key).filter { it != id }
+            if (others.isEmpty()) assign() else {
+                AlertDialog.Builder(themed)
+                    .setTitle("${Shortcuts.label(chosen)} is taken")
+                    .setMessage("It belongs to:\n" + others.joinToString("\n") + "\n\nUse it for $name instead?")
+                    .setPositiveButton("Reassign") { _, _ -> assign() }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+        }
+    }
+
+    /** Notepad++'s Edit Popup ContextMenu: which commands follow cut, copy and paste in the selection toolbar. */
+    private fun selectionMenuDialog() {
+        val chosen = selectionMenuIds().toMutableSet()
+        val choices = SELECTION_MENU_CHOICES.filter { commandEntry(it.first) != null }
+        AlertDialog.Builder(themed)
+            .setTitle("Selection Menu Items")
+            .setMultiChoiceItems(
+                choices.map { it.second }.toTypedArray(), choices.map { it.first in chosen }.toBooleanArray(),
+            ) { _, which, checked -> if (checked) chosen += choices[which].first else chosen -= choices[which].first }
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                prefs.edit().putString("selectionMenu", choices.map { it.first }.filter { it in chosen }.joinToString("\n")).apply()
+                applySelectionMenu()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun selectionMenuIds(): List<String> =
+        (prefs.getString("selectionMenu", null) ?: DEFAULT_SELECTION_MENU).split('\n').filter { it.isNotEmpty() }
+
+    private fun applySelectionMenu() {
+        val names = SELECTION_MENU_CHOICES.toMap()
+        editor.extraActions = selectionMenuIds().mapNotNull { id ->
+            names[id]?.let { name -> name to { runCommand(id); updateStatus() } }
+        }
+    }
+
+    // endregion
 
     /** Notepad++'s status bar: position on the left; line ending, encoding and language on the right, each tappable. */
     private fun statusBar(): View {
@@ -538,7 +690,7 @@ class MainActivity : Activity() {
 
     private fun refreshTabs() {
         shownDirty = workspace.isDirty(workspace.active)
-        tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, workspace.isDirty(it), it === workspace.active, it.colour) })
+        tabs.setTabs(workspace.docs.map { TabStrip.Tab(it.name, workspace.isDirty(it), it === workspace.active, it.colour, it.pinned) })
         updateStatus()
     }
 
@@ -741,6 +893,28 @@ class MainActivity : Activity() {
                 }
             }
 
+            REQUEST_IMPORT_THEME -> {
+                val uris = ArrayList<Uri>()
+                data.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { uris += it } }
+                if (uris.isEmpty()) data.data?.let { uris += it }
+                io.execute {
+                    val imported = uris.mapNotNull { uri ->
+                        val bytes = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                        bytes?.let { importTheme(FileIo.displayName(this, uri), it) }
+                    }
+                    ui.post {
+                        if (destroyed) return@post
+                        toast(
+                            when {
+                                imported.isEmpty() -> "That is not a Notepad++ theme file"
+                                imported.size == 1 -> "Imported ${imported[0].removeSuffix(".xml")}. It is now listed under Theme."
+                                else -> "Imported ${imported.size} themes. They are now listed under Theme."
+                            },
+                        )
+                    }
+                }
+            }
+
             REQUEST_FIND_FOLDER -> data.data?.let { tree ->
                 try {
                     contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -842,28 +1016,32 @@ class MainActivity : Activity() {
 
     // region Menus
 
-    private fun showMenu(title: String, build: MenuSpec.() -> Unit) {
+    private fun showMenu(title: String, shortcuts: Boolean = false, build: MenuSpec.() -> Unit) {
         menuSheet?.dismiss()
         menuSheet = MenuSheet(themed, palette.dark).also { sheet ->
             sheet.onAction = { updateStatus() }
+            if (shortcuts) sheet.hints = { path -> Shortcuts.label(shortcutTable.binding(path.joinToString(COMMAND_SEPARATOR))) }
             sheet.show(title, build)
         }
     }
 
+    private fun MenuSpec.mainMenu() {
+        sub("File") { fileMenu() }
+        sub("Edit") { editMenu() }
+        sub("Search") { searchMenu() }
+        sub("View") { viewMenu() }
+        sub("Encoding") { encodingMenu() }
+        sub("Language") { languageMenu() }
+        sub("Settings") { settingsMenu() }
+        sub("Tools") { toolsMenu() }
+        sub("Macro") { macroMenu() }
+        sub("Run") { item("Run...") { runDialog() } }
+        sub("Window") { windowMenu() }
+        sub("?") { helpMenu() }
+    }
+
     private fun showMainMenu(open: String? = null) {
-        showMenu("Menu") {
-            sub("File") { fileMenu() }
-            sub("Edit") { editMenu() }
-            sub("Search") { searchMenu() }
-            sub("View") { viewMenu() }
-            sub("Encoding") { encodingMenu() }
-            sub("Language") { languageMenu() }
-            sub("Settings") { settingsMenu() }
-            sub("Tools") { toolsMenu() }
-            sub("Macro") { macroMenu() }
-            sub("Window") { windowMenu() }
-            sub("?") { helpMenu() }
-        }
+        showMenu("Menu", shortcuts = true) { mainMenu() }
         if (open != null) menuSheet?.open(open)
     }
 
@@ -889,16 +1067,21 @@ class MainActivity : Activity() {
             item("Close All to the Left") { closeMany(workspace.docs.take(index)) }
             item("Close All to the Right") { closeMany(workspace.docs.drop(index + 1)) }
             item("Close All Unchanged") { closeMany(workspace.docs.filter { !workspace.isDirty(it) }) }
+            item("Close All but Pinned Documents") { closeMany(workspace.docs.filter { !it.pinned }) }
         }
         sub("Recent Files") {
             val recent = recentFiles()
-            for ((uri, name) in recent) {
-                item(name) { openUris(listOf(uri)) }
+            if (!cataloguing) {
+                for ((uri, name) in recent) {
+                    item(name) { openUris(listOf(uri)) }
+                }
             }
             item("Restore Recent Closed File", enabled = recent.isNotEmpty()) { openUris(listOf(recent.first().first)) }
             item("Open All Recent Files", enabled = recent.isNotEmpty()) { openUris(recent.map { it.first }) }
             item("Empty Recent Files List", enabled = recent.isNotEmpty()) { prefs.edit().remove("recent").apply() }
         }
+        item("Print...") { printDocument() }
+        item("Print Now") { printDocument() }
         item("Exit") {
             // Like Notepad++ with its session snapshot: nothing is asked, everything comes back next time.
             workspace.saveSession()
@@ -916,7 +1099,7 @@ class MainActivity : Activity() {
         item("Paste") { editor.send(Sci.SCI_PASTE) }
         item("Delete") { editor.send(Sci.SCI_CLEAR) }
         item("Select All") { editor.send(Sci.SCI_SELECTALL) }
-        item(if (beginSelect == null) "Begin/End Select" else "Begin/End Select (end here)") { beginEndSelect(column = false) }
+        item(if (beginSelect == null) "Begin/End Select" else "Begin/End Select (end here)", id = "Begin/End Select") { beginEndSelect(column = false) }
         item(if (beginSelect == null) "Begin/End Select in Column Mode" else "Begin/End Select in Column Mode (end here)") {
             beginEndSelect(column = true)
         }
@@ -1011,6 +1194,17 @@ class MainActivity : Activity() {
             item("Space to TAB (Leading)") { EditOps.spacesToTabs(editor, leadingOnly = true) }
         }
         sub("Paste Special") {
+            item("Copy Binary Content") { copyBinary(cut = false) }
+            item("Cut Binary Content") { copyBinary(cut = true) }
+            item("Paste Binary Content") {
+                val bytes = binaryClip
+                if (bytes == null) toast("Nothing was copied with Copy Binary Content") else {
+                    editor.send(Sci.SCI_BEGINUNDOACTION)
+                    editor.send(Sci.SCI_CLEAR)
+                    editor.sendBytes(Sci.SCI_ADDTEXT, bytes.size.toLong(), bytes)
+                    editor.send(Sci.SCI_ENDUNDOACTION)
+                }
+            }
             item("Paste HTML Content") {
                 val html = (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                     .primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.htmlText
@@ -1021,12 +1215,7 @@ class MainActivity : Activity() {
             item("Open File") { openSelectedFile() }
             item("Search on Internet") { searchOnInternet() }
             item("Redact Selection") { if (!EditOps.redactSelection(editor)) toast("Select some text first") }
-            sub("Change Search Engine...") {
-                val current = prefs.getString("searchEngine", "") ?: ""
-                for ((name, template) in SEARCH_ENGINES) {
-                    item(name, checked = template == current) { prefs.edit().putString("searchEngine", template).apply() }
-                }
-            }
+            sub("Change Search Engine...") { searchEngineItems() }
         }
         item("Character Panel") { characterPanel() }
         item("Clipboard History") { clipboardHistory() }
@@ -1185,6 +1374,9 @@ class MainActivity : Activity() {
         item("Toggle Full Screen Mode", checked = fullScreen && !distractionFree) { setScreenMode(full = !fullScreen || distractionFree, bare = false) }
         item("Distraction Free Mode", checked = distractionFree) { setScreenMode(full = !distractionFree, bare = !distractionFree) }
         item("View Current File in Browser", enabled = workspace.active.uri != null) { viewInAnotherApp(workspace.active, "text/html") }
+        item("Monitoring (tail -f)", checked = workspace.active.monitoring, enabled = workspace.active.uri != null) {
+            setMonitoring(workspace.active, !workspace.active.monitoring)
+        }
         item("Hide Lines") { if (!EditOps.hideLines(editor)) toast("The first and last line cannot be hidden") }
         item("Show Hidden Lines") { editor.send(Sci.SCI_SHOWLINES, 0, editor.send(Sci.SCI_GETLINECOUNT) - 1) }
         sub("Tab") {
@@ -1196,6 +1388,7 @@ class MainActivity : Activity() {
             }
             for (colour in 1..5) item("Apply Colour $colour", checked = workspace.active.colour == colour) { setTabColour(workspace.active, colour) }
             item("Remove Colour") { setTabColour(workspace.active, 0) }
+            item("Pin Tab", checked = workspace.active.pinned) { workspace.setPinned(workspace.active, !workspace.active.pinned) }
             item("First Tab") { workspace.activate(docs.first()) }
             item("Last Tab") { workspace.activate(docs.last()) }
             item("Next Tab") { workspace.activate(docs[(index + 1) % docs.size]) }
@@ -1252,7 +1445,22 @@ class MainActivity : Activity() {
     }
 
     private fun MenuSpec.settingsMenu() {
-        val textMode = editor.keyboardMode == ScintillaView.KeyboardMode.TEXT
+        item("Preferences...") { showPreferences() }
+        item("Style Configurator...") { showStyleConfigurator() }
+        item("Shortcut Mapper...") { showShortcutMapper() }
+        sub("Import") {
+            item("Import Style Theme(s)...") { pickThemes() }
+        }
+        item("Selection Menu Items...") { selectionMenuDialog() }
+        appearanceItems()
+        keyboardItems()
+        item("Keyboard log", checked = imeLogView.visibility == View.VISIBLE) {
+            imeLogView.visibility = if (imeLogView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            showImeLog()
+        }
+    }
+
+    private fun MenuSpec.appearanceItems() {
         // Notepad++'s dark mode is its DarkModeDefault theme; the other themes are under Theme.
         item("Dark mode", checked = palette.dark) { chooseTheme(if (palette.dark) "" else DARK_THEME) }
         sub("Theme") {
@@ -1261,10 +1469,6 @@ class MainActivity : Activity() {
                 item(file.removeSuffix(".xml"), checked = file == themeName) { chooseTheme(file) }
             }
         }
-        item("Keyboard suggestions and autocorrect", checked = textMode) {
-            editor.keyboardMode = if (textMode) ScintillaView.KeyboardMode.CODE else ScintillaView.KeyboardMode.TEXT
-            prefs.edit().putBoolean("textKeyboard", !textMode).apply()
-        }
         item("Show line numbers", checked = showLineNumbers) {
             showLineNumbers = !showLineNumbers
             prefs.edit().putBoolean("lineNumbers", showLineNumbers).apply()
@@ -1272,19 +1476,283 @@ class MainActivity : Activity() {
         }
         item("Bigger text") { setFontSize(fontSize + 1) }
         item("Smaller text") { setFontSize(fontSize - 1) }
-        item("Keyboard log", checked = imeLogView.visibility == View.VISIBLE) {
-            imeLogView.visibility = if (imeLogView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            showImeLog()
+    }
+
+    private fun MenuSpec.keyboardItems() {
+        val textMode = editor.keyboardMode == ScintillaView.KeyboardMode.TEXT
+        item("Keyboard suggestions and autocorrect", checked = textMode) {
+            editor.keyboardMode = if (textMode) ScintillaView.KeyboardMode.CODE else ScintillaView.KeyboardMode.TEXT
+            prefs.edit().putBoolean("textKeyboard", !textMode).apply()
         }
     }
 
+    private fun MenuSpec.searchEngineItems() {
+        val current = prefs.getString("searchEngine", "") ?: ""
+        for ((name, template) in SEARCH_ENGINES) {
+            item(name, checked = template == current) { prefs.edit().putString("searchEngine", template).apply() }
+        }
+    }
+
+    // region Preferences
+
+    private fun changeOptions(changed: EditorOptions) {
+        options = changed
+        prefs.edit()
+            .putInt("tabSize", changed.tabSize).putBoolean("useSpaces", changed.useSpaces)
+            .putBoolean("autoIndent", changed.autoIndent).putBoolean("currentLine", changed.highlightCurrentLine)
+            .putInt("caret", changed.caret).putBoolean("caretBlinks", changed.caretBlinks)
+            .putBoolean("scrollBeyond", changed.scrollBeyondLastLine).putInt("edgeColumn", changed.edgeColumn)
+            .apply()
+        // Styling again brings back what the theme decides, and the options are laid over that.
+        workspace.restyle()
+    }
+
+    /** Notepad++'s Preferences dialog, as far as its pages have a meaning here, as one menu to walk through. */
+    private fun showPreferences() = showMenu("Preferences") {
+        sub("Editing") {
+            sub("Tab Size") {
+                for (size in listOf(2, 3, 4, 6, 8)) {
+                    item(size.toString(), checked = options.tabSize == size) { changeOptions(options.copy(tabSize = size)) }
+                }
+            }
+            item("Replace Tabs by Spaces", checked = options.useSpaces) { changeOptions(options.copy(useSpaces = !options.useSpaces)) }
+            item("Auto-indent", checked = options.autoIndent) { changeOptions(options.copy(autoIndent = !options.autoIndent)) }
+            item("Highlight Current Line", checked = options.highlightCurrentLine) {
+                changeOptions(options.copy(highlightCurrentLine = !options.highlightCurrentLine))
+            }
+            sub("Caret") {
+                for ((label, width) in listOf("Thin" to 1, "Normal" to 2, "Thick" to 3, "Block" to 4)) {
+                    item(label, checked = options.caret == width) { changeOptions(options.copy(caret = width)) }
+                }
+                item("Blinking", checked = options.caretBlinks) { changeOptions(options.copy(caretBlinks = !options.caretBlinks)) }
+            }
+            item("Scroll Beyond Last Line", checked = options.scrollBeyondLastLine) {
+                changeOptions(options.copy(scrollBeyondLastLine = !options.scrollBeyondLastLine))
+            }
+            sub("Vertical Edge") {
+                item("None", checked = options.edgeColumn == 0) { changeOptions(options.copy(edgeColumn = 0)) }
+                for (column in listOf(80, 100, 120)) {
+                    item("Column $column", checked = options.edgeColumn == column) { changeOptions(options.copy(edgeColumn = column)) }
+                }
+            }
+        }
+        sub("New Document") {
+            sub("Line Ending") {
+                for (eol in Eol.entries) {
+                    item(eol.longLabel, checked = workspace.newDocumentEol == eol) {
+                        workspace.newDocumentEol = eol
+                        prefs.edit().putInt("newEol", eol.sciMode).apply()
+                    }
+                }
+            }
+            sub("Encoding") {
+                for (encoding in listOf(TextEncodings.UTF8, TextEncodings.UTF8_BOM, TextEncodings.UTF16_BE, TextEncodings.UTF16_LE)) {
+                    item(encoding.label, checked = workspace.newDocumentEncoding == encoding) {
+                        workspace.newDocumentEncoding = encoding
+                        prefs.edit().putString("newEncoding", encoding.id).apply()
+                    }
+                }
+            }
+        }
+        sub("Appearance") {
+            appearanceItems()
+            item("Style Configurator...") { showStyleConfigurator() }
+        }
+        sub("Keyboard") {
+            keyboardItems()
+            item("Shortcut Mapper...") { showShortcutMapper() }
+            item("Selection Menu Items...") { selectionMenuDialog() }
+        }
+        sub("Search") {
+            sub("Search Engine") { searchEngineItems() }
+        }
+    }
+
+    // endregion
+
+    // region Style Configurator
+
+    private fun showStyleConfigurator() = showMenu("Style Configurator") {
+        sub("Font") {
+            for ((label, family) in FONTS) {
+                item(label, checked = fontName == family) {
+                    fontName = family
+                    prefs.edit().putString("fontName", family).apply()
+                    workspace.restyle()
+                }
+            }
+        }
+        item("Bigger Text ($fontSize)", checked = false, id = "Bigger Text") { setFontSize(fontSize + 1) }
+        item("Smaller Text", checked = false) { setFontSize(fontSize - 1) }
+        sub("Global Styles") { styleItems("", baseTheme.globalStyles) }
+        val language = workspace.active.language
+        if (baseTheme.lexerStyles(language.name).isNotEmpty()) {
+            sub(language.display) { styleItems(language.name, baseTheme.lexerStyles(language.name)) }
+        }
+        sub("All Languages") {
+            val named = baseTheme.lexerNames.map { name -> (workspace.languages.byName(name)?.display ?: name) to name }
+            for ((display, name) in named.sortedBy { it.first.lowercase() }) {
+                sub(display) { styleItems(name, baseTheme.lexerStyles(name)) }
+            }
+        }
+        item("Reset All Styles of This Theme", enabled = !styleOverrides.isEmpty, checked = false) {
+            styleOverrides.clear()
+            stylesChanged()
+        }
+    }
+
+    private fun MenuSpec.styleItems(lexer: String, styles: List<WordStyle>) {
+        for (style in styles.distinctBy { it.name }) {
+            if (style.name.isEmpty()) continue
+            // A tick marks the styles that were changed.
+            item(style.name, checked = styleOverrides.get(lexer, style.name) != null) { styleDialog(lexer, style) }
+        }
+    }
+
+    private fun stylesChanged() {
+        prefs.edit().putString("styles:$themeName", styleOverrides.encode()).apply()
+        showTheme(baseTheme.with(styleOverrides))
+        menuSheet?.refresh()
+    }
+
+    /** One style of the theme: its two colours and whether it is bold, italic or underlined. */
+    private fun styleDialog(lexer: String, base: WordStyle) {
+        val theme = workspace.theme
+        val now = (if (lexer.isEmpty()) theme.global(base.name) else theme.lexerStyles(lexer).firstOrNull { it.name == base.name }) ?: base
+        val default = theme.global("Default Style")
+        fun hex(colour: Int?) = colour?.let { "%06X".format(it and 0xFFFFFF) } ?: ""
+        fun parse(text: String): Int? = text.trim().removePrefix("#").takeIf { it.length == 6 }?.toIntOrNull(16)
+
+        val preview = TextView(themed).apply {
+            contentDescription = "Style preview"
+            text = "AaBbCc 0123 { }"
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            gravity = Gravity.CENTER
+            setPadding(dp(8f), dp(12f), dp(8f), dp(12f))
+        }
+        val bold = CheckBox(themed).apply { text = "Bold"; isChecked = now.bold }
+        val italic = CheckBox(themed).apply { text = "Italic"; isChecked = now.italic }
+        val underline = CheckBox(themed).apply { text = "Underline"; isChecked = now.underline }
+        fun colourField(label: String, initial: Int?) = EditText(themed).apply {
+            contentDescription = "$label colour"
+            hint = "RRGGBB, empty for the theme's own"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(hex(initial))
+        }
+        val fore = colourField("Foreground", now.fg)
+        val back = colourField("Background", now.bg)
+        fun refresh() {
+            preview.setTextColor((parse(fore.text.toString()) ?: base.fg ?: default?.fg ?: 0) or 0xFF000000.toInt())
+            preview.setBackgroundColor((parse(back.text.toString()) ?: base.bg ?: default?.bg ?: 0xFFFFFF) or 0xFF000000.toInt())
+            preview.setTypeface(Typeface.MONOSPACE, (if (bold.isChecked) Typeface.BOLD else 0) or (if (italic.isChecked) Typeface.ITALIC else 0))
+            preview.paintFlags = if (underline.isChecked) preview.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
+            else preview.paintFlags and android.graphics.Paint.UNDERLINE_TEXT_FLAG.inv()
+        }
+        fun swatches(target: EditText, label: String) = HorizontalScrollView(themed).apply {
+            addView(LinearLayout(themed).apply {
+                orientation = LinearLayout.HORIZONTAL
+                for (colour in SWATCHES) {
+                    addView(View(themed).apply {
+                        contentDescription = "$label ${hex(colour)}"
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            setColor(colour or 0xFF000000.toInt())
+                            setStroke(dp(1f), palette.chromeDimText)
+                        }
+                        setOnClickListener { target.setText(hex(colour)) }
+                    }, LinearLayout.LayoutParams(dp(34f), dp(34f)).apply { setMargins(0, dp(4f), dp(6f), dp(8f)) })
+                }
+            })
+        }
+        val watcher = object : android.text.TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(text: android.text.Editable?) = refresh()
+        }
+        fore.addTextChangedListener(watcher)
+        back.addTextChangedListener(watcher)
+        for (boxView in listOf(bold, italic, underline)) boxView.setOnCheckedChangeListener { _, _ -> refresh() }
+        refresh()
+
+        val container = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(TextView(themed).apply { text = "Foreground"; setPadding(0, dp(8f), 0, 0) })
+            addView(fore, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(swatches(fore, "Foreground"))
+            addView(TextView(themed).apply { text = "Background" })
+            addView(back, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(swatches(back, "Background"))
+            addView(LinearLayout(themed).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(bold)
+                addView(italic)
+                addView(underline)
+            })
+        }
+        val scroll = ScrollView(themed).apply { addView(container) }
+        val title = if (lexer.isEmpty()) base.name else "${workspace.languages.byName(lexer)?.display ?: lexer}: ${base.name}"
+        AlertDialog.Builder(themed)
+            .setTitle(title)
+            .setView(scroll)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val fontStyle = (if (bold.isChecked) 1 else 0) or (if (italic.isChecked) 2 else 0) or (if (underline.isChecked) 4 else 0)
+                val fg = parse(fore.text.toString())
+                val bg = parse(back.text.toString())
+                // Only what differs from the theme is kept, so a later theme update still shows through.
+                styleOverrides.set(
+                    lexer, base.name,
+                    StyleChange(fg.takeIf { it != base.fg }, bg.takeIf { it != base.bg }, fontStyle.takeIf { it != base.fontStyle }),
+                )
+                stylesChanged()
+            }
+            .setNeutralButton("Reset") { _, _ ->
+                styleOverrides.set(lexer, base.name, null)
+                stylesChanged()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // endregion
+
+    private fun importedThemes() = java.io.File(filesDir, "themes")
+
+    private fun pickThemes() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQUEST_IMPORT_THEME)
+        } catch (e: Exception) {
+            toast("No file picker is available")
+        }
+    }
+
+    /** Settings > Import > Import Style Theme(s): keeps a Notepad++ theme file with the app. Returns its name, or null if it is not one. */
+    internal fun importTheme(fileName: String, content: ByteArray): String? {
+        val theme = runCatching { NppTheme.load(content.inputStream()) }.getOrNull() ?: return null
+        if (theme.global("Default Style") == null) return null
+        val name = fileName.substringAfterLast('/').removeSuffix(".xml").replace(Regex("[^A-Za-z0-9 ._()+-]"), "_").ifEmpty { "Imported" } + ".xml"
+        importedThemes().mkdirs()
+        java.io.File(importedThemes(), name).writeBytes(content)
+        return name
+    }
+
     private fun themeFiles(): List<String> =
-        (assets.list("npp/themes") ?: emptyArray()).filter { it.endsWith(".xml") }.sortedBy { it.lowercase() }
+        ((assets.list("npp/themes") ?: emptyArray()).toList() + (importedThemes().list() ?: emptyArray()).toList())
+            .filter { it.endsWith(".xml") }.distinct().sortedBy { it.lowercase() }
 
     /** Reads a Notepad++ theme shipped with the app; an empty or unreadable name gives the default one. */
     private fun loadTheme(name: String): NppTheme {
         if (name.isNotEmpty()) {
             try {
+                val imported = java.io.File(importedThemes(), name)
+                if (imported.isFile) return imported.inputStream().use { NppTheme.load(it) }
                 return assets.open("npp/themes/$name").use { NppTheme.load(it) }
             } catch (e: Exception) {
                 // Fall through to the default theme.
@@ -1295,9 +1763,15 @@ class MainActivity : Activity() {
 
     private fun chooseTheme(name: String) {
         if (name == themeName) return
-        val theme = loadTheme(name)
+        baseTheme = loadTheme(name)
         themeName = name
         prefs.edit().putString("theme", name).apply()
+        styleOverrides = StyleOverrides.decode(prefs.getString("styles:$name", "") ?: "")
+        showTheme(baseTheme.with(styleOverrides))
+    }
+
+    /** Puts a theme on screen: the editor's styles, and the bars around it when it goes between light and dark. */
+    private fun showTheme(theme: NppTheme) {
         if (theme.isDark != palette.dark) {
             // Only the bars around the editor are rebuilt in the other colours. The editor view stays, so the
             // open documents keep their undo history, and a menu that is open stays open.
@@ -1320,6 +1794,7 @@ class MainActivity : Activity() {
     private fun showTabMenu(doc: Doc) = showMenu(doc.name) {
         val index = workspace.docs.indexOf(doc)
         item("Close") { requestClose(doc) }
+        item("Pin Tab", checked = doc.pinned) { workspace.setPinned(doc, !doc.pinned) }
         item("Close All but This") { closeMany(workspace.docs.filter { it !== doc }) }
         item("Close All to the Left") { closeMany(workspace.docs.take(index)) }
         item("Close All to the Right") { closeMany(workspace.docs.drop(index + 1)) }
@@ -1542,8 +2017,10 @@ class MainActivity : Activity() {
             for ((label, order) in orders) item(label) { workspace.sortTabs(order) }
         }
         item("Windows...") { showWindowsList() }
-        for (doc in workspace.docs) {
-            item(doc.name, checked = doc === workspace.active) { workspace.activate(doc) }
+        if (!cataloguing) {
+            for (doc in workspace.docs) {
+                item(doc.name, checked = doc === workspace.active) { workspace.activate(doc) }
+            }
         }
     }
 
@@ -1716,7 +2193,7 @@ class MainActivity : Activity() {
         item("Save Current Recorded Macro...", enabled = !recording && currentMacro.isNotEmpty()) { saveMacro() }
         item("Run a Macro Multiple Times...", enabled = !recording && (currentMacro.isNotEmpty() || saved.isNotEmpty())) { runMacroDialog() }
         for ((name, steps) in saved) item(name, enabled = !recording) { Macros.play(editor, steps) }
-        if (saved.isNotEmpty()) {
+        if (saved.isNotEmpty() && !cataloguing) {
             sub("Delete Macro") {
                 for ((name, _) in saved) item(name) { storeMacros(savedMacros().filter { it.first != name }) }
             }
@@ -2140,6 +2617,115 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // Copy Binary Content keeps the exact bytes, NUL characters included, which Android's clipboard would cut short.
+    private var binaryClip: ByteArray? = null
+
+    private fun copyBinary(cut: Boolean) {
+        val start = editor.send(Sci.SCI_GETSELECTIONSTART)
+        val end = editor.send(Sci.SCI_GETSELECTIONEND)
+        if (end <= start) return toast("Select some text first")
+        val bytes = editor.range(start, end)
+        binaryClip = bytes
+        editor.setClipboard(String(bytes, Charsets.UTF_8))
+        if (cut) editor.send(Sci.SCI_CLEAR)
+    }
+
+    /** View > Monitoring (tail -f): the file is checked every two seconds and shown again, at its end, when it has changed. */
+    private fun setMonitoring(doc: Doc, on: Boolean) {
+        val uri = doc.uri ?: return
+        doc.monitoring = on
+        if (doc === workspace.active) editor.send(Sci.SCI_SETREADONLY, if (on) 1 else 0)
+        if (on) {
+            doc.monitorStamp = FileIo.stamp(this, uri)
+            ui.removeCallbacks(monitor)
+            ui.postDelayed(monitor, MONITOR_MS)
+        }
+        updateStatus()
+    }
+
+    private val monitor = object : Runnable {
+        override fun run() {
+            if (destroyed) return
+            if (workspace.docs.none { it.monitoring }) return
+            ui.postDelayed(this, MONITOR_MS)
+            val doc = workspace.active
+            val uri = doc.uri
+            if (!doc.monitoring || uri == null) return
+            io.execute {
+                val stamp = FileIo.stamp(this@MainActivity, uri)
+                if (stamp == doc.monitorStamp) return@execute
+                val file = runCatching { FileIo.read(this@MainActivity, uri, doc.encoding) }.getOrNull() ?: return@execute
+                ui.post {
+                    if (destroyed || doc !== workspace.active || !doc.monitoring) return@post
+                    doc.monitorStamp = stamp
+                    editor.send(Sci.SCI_SETREADONLY, 0)
+                    workspace.reloaded(file)
+                    editor.send(Sci.SCI_SETREADONLY, 1)
+                    editor.send(Sci.SCI_DOCUMENTEND)
+                }
+            }
+        }
+    }
+
+    /** Notepad++'s Run dialog, which starts programs. Here it opens an address or link in whichever app handles it. */
+    private fun runDialog() {
+        val doc = workspace.active
+        val input = EditText(themed).apply {
+            contentDescription = "Address to open"
+            hint = "https://... or another app's link"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(prefs.getString("runCommand", "") ?: "")
+        }
+        val help = TextView(themed).apply {
+            text = "\$(CURRENT_WORD), \$(FILE_NAME) and \$(FULL_CURRENT_PATH) are replaced, for example\nhttps://en.wikipedia.org/wiki/Special:Search?search=\$(CURRENT_WORD)"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(0, dp(8f), 0, 0)
+        }
+        val container = LinearLayout(themed).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(8f), dp(20f), 0)
+            addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(help)
+        }
+        AlertDialog.Builder(themed)
+            .setTitle("Run")
+            .setView(container)
+            .setPositiveButton("Run") { _, _ ->
+                val command = input.text.toString().trim()
+                if (command.isEmpty()) return@setPositiveButton
+                prefs.edit().putString("runCommand", command).apply()
+                openLink(RunCommand.expand(command, EditOps.selectionOrWord(editor), doc.name, doc.uri?.toString() ?: ""))
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // Kept until the system has taken the page over for printing.
+    private var printView: android.webkit.WebView? = null
+
+    /** File > Print: hands the text to Android's print service, which also offers Save as PDF. */
+    private fun printDocument() {
+        val doc = workspace.active
+        if (editor.send(Sci.SCI_GETLENGTH) > MAX_PRINT_BYTES) return toast("This document is too large to print from here")
+        val escaped = android.text.TextUtils.htmlEncode(editor.text)
+        val page = "<html><body><pre style=\"font-family:monospace;font-size:10pt;white-space:pre-wrap;word-wrap:break-word\">$escaped</pre></body></html>"
+        val web = android.webkit.WebView(this)
+        web.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(view: android.webkit.WebView, url: String?) {
+                try {
+                    (getSystemService(Context.PRINT_SERVICE) as android.print.PrintManager).print(
+                        "Pocketpad++ - ${doc.name}", view.createPrintDocumentAdapter(doc.name), android.print.PrintAttributes.Builder().build(),
+                    )
+                } catch (e: Exception) {
+                    toast("Printing is not available on this device")
+                }
+                printView = null
+            }
+        }
+        printView = web
+        web.loadDataWithBaseURL(null, page, "text/html", "UTF-8", null)
+    }
+
     private fun setTabColour(doc: Doc, colour: Int) {
         doc.colour = colour
         refreshTabs()
@@ -2298,7 +2884,108 @@ class MainActivity : Activity() {
         const val REQUEST_LOAD_SESSION = 4
         const val REQUEST_SAVE_SESSION = 5
         const val REQUEST_FIND_FOLDER = 6
+        const val REQUEST_IMPORT_THEME = 7
+        const val COMMAND_SEPARATOR = " > "
+
+        /** Font families every Android device has. */
+        val FONTS = listOf(
+            "Monospace" to "monospace", "Serif Monospace" to "serif-monospace", "Sans Serif" to "sans-serif", "Serif" to "serif",
+        )
+
+        val SWATCHES = listOf(
+            0x000000, 0x404040, 0x808080, 0xC0C0C0, 0xFFFFFF, 0x800000, 0xFF0000, 0xFF8000, 0xFFFF00, 0x808000,
+            0x008000, 0x00C000, 0x008080, 0x00FFFF, 0x000080, 0x0000FF, 0x8000FF, 0x800080, 0xFF00FF, 0x804000,
+        )
+
+        /** What can be added to the selection toolbar, by command and by the short name shown there. */
+        val SELECTION_MENU_CHOICES = listOf(
+            "Edit > Delete" to "Delete",
+            "Edit > Convert Case to > UPPERCASE" to "UPPERCASE",
+            "Edit > Convert Case to > lowercase" to "lowercase",
+            "Edit > Comment/Uncomment > Toggle Single Line Comment" to "Comment",
+            "Edit > Comment/Uncomment > Block Comment" to "Block comment",
+            "Edit > Indent > Increase Line Indent" to "Indent",
+            "Edit > Indent > Decrease Line Indent" to "Outdent",
+            "Edit > Line Operations > Duplicate Current Line" to "Duplicate",
+            "Edit > On Selection > Search on Internet" to "Search web",
+            "Edit > On Selection > Open File" to "Open file",
+            "Edit > On Selection > Redact Selection" to "Redact",
+            "Search > Select and Find Next" to "Find next",
+            "Search > Find All in Current Document" to "Find all",
+            "Search > Mark All > Using 1st Style" to "Mark",
+            "Search > Unmark All > Clear all Styles" to "Unmark",
+            "Search > Bookmark > Toggle Bookmark" to "Bookmark",
+            "View > Hide Lines" to "Hide lines",
+        )
+        const val DEFAULT_SELECTION_MENU = ""
+
+        private fun key(modifiers: Int, key: Int) = KeyBinding(modifiers, key)
+        private fun f(n: Int) = Shortcuts.FUNCTION + n
+        private const val CTRL = Sci.SCMOD_CTRL
+        private const val ALT = Sci.SCMOD_ALT
+        private const val SHIFT = Sci.SCMOD_SHIFT
+
+        /** The shortcuts Notepad++ comes with, for the commands found here, by their place in the menus. */
+        val DEFAULT_SHORTCUTS: Map<String, KeyBinding> = LinkedHashMap<String, KeyBinding>().apply {
+            put("File > New", key(CTRL, 'N'.code))
+            put("File > Open...", key(CTRL, 'O'.code))
+            put("File > Save", key(CTRL, 'S'.code))
+            put("File > Save As...", key(CTRL or ALT, 'S'.code))
+            put("File > Save All", key(CTRL or SHIFT, 'S'.code))
+            put("File > Close", key(CTRL, 'W'.code))
+            put("File > Close All", key(CTRL or SHIFT, 'W'.code))
+            put("File > Recent Files > Restore Recent Closed File", key(CTRL or SHIFT, 'T'.code))
+            put("File > Print...", key(CTRL, 'P'.code))
+            put("Edit > Line Operations > Join Lines", key(CTRL, 'J'.code))
+            put("Edit > Line Operations > Split Lines", key(CTRL, 'I'.code))
+            put("Edit > Line Operations > Move Up Current Line", key(CTRL or SHIFT, Sci.SCK_UP))
+            put("Edit > Line Operations > Move Down Current Line", key(CTRL or SHIFT, Sci.SCK_DOWN))
+            put("Edit > Comment/Uncomment > Toggle Single Line Comment", key(CTRL, 'Q'.code))
+            put("Edit > Comment/Uncomment > Single Line Comment", key(CTRL, 'K'.code))
+            put("Edit > Comment/Uncomment > Single Line Uncomment", key(CTRL or SHIFT, 'K'.code))
+            put("Edit > Comment/Uncomment > Block Comment", key(CTRL or SHIFT, 'Q'.code))
+            put("Edit > Column Editor...", key(ALT, 'C'.code))
+            put("Search > Find...", key(CTRL, 'F'.code))
+            put("Search > Find Next", key(0, f(3)))
+            put("Search > Find Previous", key(SHIFT, f(3)))
+            put("Search > Select and Find Next", key(CTRL, f(3)))
+            put("Search > Select and Find Previous", key(CTRL or SHIFT, f(3)))
+            put("Search > Replace...", key(CTRL, 'H'.code))
+            put("Search > Find in Files...", key(CTRL or SHIFT, 'F'.code))
+            put("Search > Search Results Window", key(0, f(7)))
+            put("Search > Next Search Result", key(0, f(4)))
+            put("Search > Previous Search Result", key(SHIFT, f(4)))
+            put("Search > Incremental Search", key(CTRL or ALT, 'I'.code))
+            put("Search > Mark...", key(CTRL, 'M'.code))
+            put("Search > Go to...", key(CTRL, 'G'.code))
+            put("Search > Go to Matching Brace", key(CTRL, 'B'.code))
+            put("Search > Select All In-between {} [] or ()", key(CTRL or ALT or SHIFT, 'B'.code))
+            put("Search > Bookmark > Toggle Bookmark", key(CTRL, f(2)))
+            put("Search > Bookmark > Next Bookmark", key(0, f(2)))
+            put("Search > Bookmark > Previous Bookmark", key(SHIFT, f(2)))
+            put("View > Zoom > Zoom In", key(CTRL, Sci.SCK_ADD))
+            put("View > Zoom > Zoom Out", key(CTRL, Sci.SCK_SUBTRACT))
+            put("View > Zoom > Restore Default Zoom", key(CTRL, Sci.SCK_DIVIDE))
+            put("View > Toggle Full Screen Mode", key(0, f(11)))
+            put("View > Hide Lines", key(ALT, 'H'.code))
+            put("View > Tab > Next Tab", key(CTRL, Sci.SCK_NEXT))
+            put("View > Tab > Previous Tab", key(CTRL, Sci.SCK_PRIOR))
+            put("View > Fold All", key(ALT, '0'.code))
+            put("View > Unfold All", key(ALT or SHIFT, '0'.code))
+            put("View > Fold Current Level", key(CTRL or ALT, 'F'.code))
+            put("View > Unfold Current Level", key(CTRL or ALT or SHIFT, 'F'.code))
+            for (level in 1..8) {
+                put("View > Fold Level > $level", key(ALT, '0'.code + level))
+                put("View > Unfold Level > $level", key(ALT or SHIFT, '0'.code + level))
+            }
+            put("Macro > Start Recording", key(CTRL or SHIFT, 'R'.code))
+            put("Macro > Stop Recording", key(CTRL or SHIFT, 'R'.code))
+            put("Macro > Playback", key(CTRL or SHIFT, 'P'.code))
+            put("Run > Run...", key(0, f(5)))
+        }
         const val MAX_FIND_FILES = 5000
+        const val MONITOR_MS = 2000L
+        const val MAX_PRINT_BYTES = 4L * 1024 * 1024
         const val MAX_FIND_FILE_BYTES = 8L * 1024 * 1024
 
         /** Edit > On Selection > Change Search Engine: an empty address means the device's own web search. */

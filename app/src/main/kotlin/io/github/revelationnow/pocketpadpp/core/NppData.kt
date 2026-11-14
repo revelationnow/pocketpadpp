@@ -171,6 +171,43 @@ data class WordStyle(
     val underline: Boolean get() = fontStyle and 4 != 0
 }
 
+/** What the Style Configurator changed about one style. A null field leaves the theme's own value. */
+data class StyleChange(val fg: Int? = null, val bg: Int? = null, val fontStyle: Int? = null)
+
+/** The user's changes to a theme, by lexer name (empty for the global styles) and style name. */
+class StyleOverrides {
+    private val changes = LinkedHashMap<Pair<String, String>, StyleChange>()
+
+    val isEmpty: Boolean get() = changes.isEmpty()
+
+    fun get(lexer: String, style: String): StyleChange? = changes[lexer to style]
+
+    /** Records a change; null or a change of nothing puts the style back to what the theme says. */
+    fun set(lexer: String, style: String, change: StyleChange?) {
+        if (change == null || change == StyleChange()) changes.remove(lexer to style) else changes[lexer to style] = change
+    }
+
+    fun clear() = changes.clear()
+
+    /** One line per style: lexer, style, foreground, background, font style, separated by tabs; "-" for unchanged. */
+    fun encode(): String = changes.entries.joinToString("\n") { (key, change) ->
+        fun hex(colour: Int?) = colour?.let { "%06X".format(it and 0xFFFFFF) } ?: "-"
+        listOf(key.first, key.second, hex(change.fg), hex(change.bg), change.fontStyle?.toString() ?: "-").joinToString("\t")
+    }
+
+    companion object {
+        fun decode(text: String): StyleOverrides {
+            val result = StyleOverrides()
+            for (line in text.split('\n')) {
+                val cells = line.split('\t')
+                if (cells.size < 5) continue
+                result.set(cells[0], cells[1], StyleChange(cells[2].toIntOrNull(16), cells[3].toIntOrNull(16), cells[4].toIntOrNull()))
+            }
+            return result
+        }
+    }
+}
+
 /** A Notepad++ style file (stylers.model.xml or a theme). */
 class NppTheme private constructor(
     private val lexers: Map<String, List<WordStyle>>,
@@ -178,6 +215,20 @@ class NppTheme private constructor(
 ) {
     fun lexerStyles(languageName: String): List<WordStyle> = lexers[languageName] ?: emptyList()
     fun global(name: String): WordStyle? = globals.firstOrNull { it.name == name }
+    val globalStyles: List<WordStyle> get() = globals
+
+    /** This theme with the user's changes laid over it. */
+    fun with(overrides: StyleOverrides): NppTheme {
+        if (overrides.isEmpty) return this
+        fun changed(lexer: String, style: WordStyle): WordStyle {
+            val change = overrides.get(lexer, style.name) ?: return style
+            return style.copy(fg = change.fg ?: style.fg, bg = change.bg ?: style.bg, fontStyle = change.fontStyle ?: style.fontStyle)
+        }
+        return NppTheme(
+            lexers.mapValues { (lexer, styles) -> styles.map { changed(lexer, it) } },
+            globals.map { changed("", it) },
+        )
+    }
     val lexerNames: Set<String> get() = lexers.keys
 
     /** Editor background and text colours, for tinting the application around the editor. */
