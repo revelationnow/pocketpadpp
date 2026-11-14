@@ -1,0 +1,7 @@
+L	entity ent1 is
+L	architecture rtl of ent1 is
+L	\tcomponent compo1 is
+L	    component reset_controller is       
+L	proc1: process (reset_reset_n, clk_clk)
+L	    block1: block is
+L	comp_per_entity : entity work.doing_so port map ( Reset_s 

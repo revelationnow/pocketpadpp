@@ -1,0 +1,25 @@
+L	pre[class*="language-"] 
+L	code[class*="language-"]::-moz-selection, code[class*="language-"] ::-moz-selection 
+L	code[class*="language-"]::selection, code[class*="language-"] ::selection 
+L	@media print 
+L	\tpre[class*="language-"] 
+L	pre[class*="language-"] 
+L	pre[class*="language-"] 
+L	:not(pre) > code[class*="language-"] 
+L	.token.cdata 
+L	.token.punctuation 
+L	.namespace 
+L	.token.deleted 
+L	.token.inserted 
+L	.style .token.string 
+L	.token.keyword 
+L	.token.class-name 
+L	.token.variable 
+L	.token.bold 
+L	.token.italic 
+L	.token.entity 
+L	pre[class*="language-"].line-numbers 
+L	pre[class*="language-"].line-numbers > code 
+L	.line-numbers .line-numbers-rows 
+L	\t.line-numbers-rows > span 
+L	\t\t.line-numbers-rows > span:before 

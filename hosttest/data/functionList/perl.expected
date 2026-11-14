@@ -1,0 +1,23 @@
+L	MakeTag
+L	PackageName
+L	SubName
+L	VarNames
+L	functionNoParentheses
+N	NameSpace::Block 	inBlock
+N	NameSpace::Block 	inBlockProto
+N	NameSpace::Block 	inBlockAttrib
+N	NameSpace::Semicolon	afterSemi
+N	NewClassSyntax 	inBlock
+N	NewClassSyntax 	inBlockProto
+N	NewClassSyntax 	inBlockAttrib
+N	BLOCK 	Block1
+N	VERSION_BLOCK 1.9 	Block2
+N	VERSION_ATTR_BLOCK 2.5 :isa(Example::Base) 	Block3
+N	STMT	Block4
+N	VERSION_STMT 2.9	Block5
+N	VERSION_ATTR_STMT 3.5 :isa(Example::Base)	Block6
+N	MyClass	MyClass::new
+N	MyClass	MyClass::do_thing
+N	MyClass	MyClass::debug
+N	Other	Other::run
+N	Other	Other::stop

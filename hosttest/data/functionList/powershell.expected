@@ -1,0 +1,9 @@
+L	Clear-Host
+L	_TabExpansionPath
+L	UnquoteString
+L	Get-Interface
+L	Get-VSService
+L	Get-VSComponentModel
+L	TabExpansion
+L	prompt
+L	Sauve+Confirm

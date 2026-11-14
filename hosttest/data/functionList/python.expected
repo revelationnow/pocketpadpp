@@ -1,0 +1,14 @@
+L	dfs(G, s)
+L	bfs(G, s)
+L	dijk(G, s)
+L	topo(G, ind=None, Q=[1])
+L	adjm()
+L	floy(A_and_n)
+L	prim(G, s)
+L	edglist()
+L	krusk(E_and_n)
+L	greet(name: str) -> str
+L	add_numbers(a: int, b: int, c: int) -> int
+N	SampleClassBad	__init__ (self, fileName)
+N	SampleClassGood	__init__ (self, fileName)
+N	SampleClassGood	calculate_area(radius: float, pi: float = 3.14) -> float

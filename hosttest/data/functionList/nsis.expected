@@ -1,0 +1,209 @@
+L	GetWindowsVersion
+L	GetWindowsVersion OUTPUT_VALUE
+L	LaunchNpp
+L	ExtraOptions
+L	OnChange_NoUserDataCheckBox
+L	OnChange_PluginLoadFromUserDataCheckBox
+L	OnChange_ShortcutCheckBox
+L	OnChange_OldIconCheckBox
+L	.onInit
+L	.onInstSuccess
+L	-"Notepad++" mainSection
+L	"Context Menu Entry" explorerContextMenu
+L	"Auto-Updater" AutoUpdater
+L	-FinishSection
+L	un.htmlViewer
+L	un.AutoUpdater
+L	un.explorerContextMenu
+L	un.UnregisterFileExt
+L	un.UserManual
+L	Uninstall
+L	un.onInit
+N	Auto-completion Files	"C" C
+N	Auto-completion Files	"C++" C++
+N	Auto-completion Files	"Java" Java
+N	Auto-completion Files	"C
+N	Auto-completion Files	"HTML" HTML
+N	Auto-completion Files	"RC" RC
+N	Auto-completion Files	"SQL" SQL
+N	Auto-completion Files	"PHP" PHP
+N	Auto-completion Files	"CSS" CSS
+N	Auto-completion Files	"VB" VB
+N	Auto-completion Files	"Perl" Perl
+N	Auto-completion Files	"JavaScript" JavaScript
+N	Auto-completion Files	"Python" Python
+N	Auto-completion Files	"ActionScript" ActionScript
+N	Auto-completion Files	"LISP" LISP
+N	Auto-completion Files	"VHDL" VHDL
+N	Auto-completion Files	"TeX" TeX
+N	Auto-completion Files	"DocBook" DocBook
+N	Auto-completion Files	"NSIS" NSIS
+N	Auto-completion Files	"CMAKE" CMAKE
+N	Plugins	"NppExport" NppExport
+N	Plugins	"Plugin Manager" PluginManager
+N	Plugins	"Mime Tools" MimeTools
+N	Plugins	"Converter" Converter
+N	Themes	"Black Board" BlackBoard
+N	Themes	"Choco" Choco
+N	Themes	"Hello Kitty" HelloKitty
+N	Themes	"Mono Industrial" MonoIndustrial
+N	Themes	"Monokai" Monokai
+N	Themes	"Obsidian" Obsidian
+N	Themes	"Plastic Code Wrap" PlasticCodeWrap
+N	Themes	"Ruby Blue" RubyBlue
+N	Themes	"Twilight" Twilight
+N	Themes	"Vibrant Ink" VibrantInk
+N	Themes	"Deep Black" DeepBlack
+N	Themes	"vim Dark Blue" vimDarkBlue
+N	Themes	"Bespin" Bespin
+N	Themes	"Zenburn" Zenburn
+N	Themes	"Solarized" Solarized
+N	Themes	"Solarized Light" Solarized-light
+N	Themes	"Hot Fudge Sundae" HotFudgeSundae
+N	Themes	"khaki" khaki
+N	Themes	"Mossy Lawn" MossyLawn
+N	Themes	"Navajo" Navajo
+N	un.autoCompletionComponent	un.PHP
+N	un.autoCompletionComponent	un.CSS
+N	un.autoCompletionComponent	un.HTML
+N	un.autoCompletionComponent	un.SQL
+N	un.autoCompletionComponent	un.RC
+N	un.autoCompletionComponent	un.VB
+N	un.autoCompletionComponent	un.Perl
+N	un.autoCompletionComponent	un.C
+N	un.autoCompletionComponent	un.C++
+N	un.autoCompletionComponent	un.Java
+N	un.autoCompletionComponent	un.C
+N	un.autoCompletionComponent	un.JavaScript
+N	un.autoCompletionComponent	un.Python
+N	un.autoCompletionComponent	un.ActionScript
+N	un.autoCompletionComponent	un.LISP
+N	un.autoCompletionComponent	un.VHDL
+N	un.autoCompletionComponent	un.TeX
+N	un.autoCompletionComponent	un.DocBook
+N	un.autoCompletionComponent	un.NSIS
+N	un.autoCompletionComponent	un.AWK
+N	un.autoCompletionComponent	un.CMAKE
+N	un.Plugins	un.NPPTextFX
+N	un.Plugins	un.NppAutoIndent
+N	un.Plugins	un.MIMETools
+N	un.Plugins	un.FTP_synchronize
+N	un.Plugins	un.NppFTP
+N	un.Plugins	un.NppExport
+N	un.Plugins	un.SelectNLaunch
+N	un.Plugins	un.DocMonitor
+N	un.Plugins	un.LightExplorer
+N	un.Plugins	un.HexEditor
+N	un.Plugins	un.ConvertExt
+N	un.Plugins	un.SpellChecker
+N	un.Plugins	un.DSpellCheck
+N	un.Plugins	un.NppExec
+N	un.Plugins	un.QuickText
+N	un.Plugins	un.ComparePlugin
+N	un.Plugins	un.Converter
+N	un.Plugins	un.MimeTools
+N	un.Plugins	un.PluginManager
+N	un.Plugins	un.ChangeMarkers
+N	un.Themes	un.BlackBoard
+N	un.Themes	un.Choco
+N	un.Themes	un.HelloKitty
+N	un.Themes	un.MonoIndustrial
+N	un.Themes	un.Monokai
+N	un.Themes	un.Obsidian
+N	un.Themes	un.PlasticCodeWrap
+N	un.Themes	un.RubyBlue
+N	un.Themes	un.Twilight
+N	un.Themes	un.VibrantInk
+N	un.Themes	un.DeepBlack
+N	un.Themes	un.vimDarkBlue
+N	un.Themes	un.Bespin
+N	un.Themes	un.Zenburn
+N	un.Themes	un.Solarized
+N	un.Themes	un.Solarized-light
+N	un.Themes	un.HotFudgeSundae
+N	un.Themes	un.khaki
+N	un.Themes	un.MossyLawn
+N	un.Themes	un.Navajo
+N	un.localization	un.afrikaans
+N	un.localization	un.albanian
+N	un.localization	un.arabic
+N	un.localization	un.aragonese
+N	un.localization	un.aranese
+N	un.localization	un.azerbaijani
+N	un.localization	un.basque
+N	un.localization	un.belarusian
+N	un.localization	un.bengali
+N	un.localization	un.bosnian
+N	un.localization	un.brazilian_portuguese
+N	un.localization	un.bulgarian
+N	un.localization	un.catalan
+N	un.localization	un.chineseTraditional
+N	un.localization	un.chineseSimplified
+N	un.localization	un.croatian
+N	un.localization	un.czech
+N	un.localization	un.danish
+N	un.localization	un.dutch
+N	un.localization	un.english_customizable
+N	un.localization	un.esperanto
+N	un.localization	un.estonian
+N	un.localization	un.extremaduran
+N	un.localization	un.farsi
+N	un.localization	un.finnish
+N	un.localization	un.friulian
+N	un.localization	un.french
+N	un.localization	un.galician
+N	un.localization	un.georgian
+N	un.localization	un.german
+N	un.localization	un.greek
+N	un.localization	un.gujarati
+N	un.localization	un.hebrew
+N	un.localization	un.hungarian
+N	un.localization	un.hungarianA
+N	un.localization	un.indonesian
+N	un.localization	un.italian
+N	un.localization	un.japanese
+N	un.localization	un.kazakh
+N	un.localization	un.korean
+N	un.localization	un.kyrgyz
+N	un.localization	un.latvian
+N	un.localization	un.ligurian
+N	un.localization	un.lithuanian
+N	un.localization	un.luxembourgish
+N	un.localization	un.macedonian
+N	un.localization	un.malay
+N	un.localization	un.marathi
+N	un.localization	un.mongolian
+N	un.localization	un.norwegian
+N	un.localization	un.nynorsk
+N	un.localization	un.occitan
+N	un.localization	un.polish
+N	un.localization	un.kannada
+N	un.localization	un.portuguese
+N	un.localization	un.punjabi
+N	un.localization	un.romanian
+N	un.localization	un.russian
+N	un.localization	un.samogitian
+N	un.localization	un.sardinian
+N	un.localization	un.serbian
+N	un.localization	un.serbianCyrillic
+N	un.localization	un.sinhala
+N	un.localization	un.slovak
+N	un.localization	un.slovakA
+N	un.localization	un.slovenian
+N	un.localization	un.spanish
+N	un.localization	un.spanish_ar
+N	un.localization	un.swedish
+N	un.localization	un.tagalog
+N	un.localization	un.tajik
+N	un.localization	un.tamil
+N	un.localization	un.tatar
+N	un.localization	un.telugu
+N	un.localization	un.thai
+N	un.localization	un.turkish
+N	un.localization	un.ukrainian
+N	un.localization	un.urdu
+N	un.localization	un.uyghur
+N	un.localization	un.uzbek
+N	un.localization	un.uzbekCyrillic
+N	un.localization	un.vietnamese
+N	un.localization	un.welsh

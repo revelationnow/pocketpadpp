@@ -1,0 +1,5 @@
+L	quat_from_euler(const euler *in_euler)
+L	euler_from_quat(const quaternion *in_quat)
+L	test()
+L	main()
+L	controlFlowNotAFunction(int state)

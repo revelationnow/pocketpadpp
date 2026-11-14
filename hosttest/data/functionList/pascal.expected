@@ -1,0 +1,37 @@
+L	FreeFunc1
+L	FreeProc1
+L	FreeFunc2
+L	FreeProc2
+L	FreeProc3
+L	FreeProc3
+L	FreeFunc3
+L	InternalProc1
+L	FreeProc4
+L	InternalFunc1
+L	FreeProc5
+L	InternalProc2
+L	FreeProc6
+N	TStdClass	Create
+N	TStdClass	Destroy
+N	TStdClass	Init
+N	TStdClass	DeInit
+N	TStdClass	ToType<X>
+N	TStdClass	SetValue
+N	TStdClass	Convert<X>
+N	TStdClass.TStdInternalClass	Create
+N	TStdClass.TStdInternalClass	Destroy
+N	TStdClass.TStdInternalClass	CopyTo
+N	TGenericClass<T>	Create
+N	TGenericClass<T>	Destroy
+N	TGenericClass<T>	Init<I>
+N	TGenericClass<T>	DeInit
+N	TGenericClass<T>	SetValue
+N	TGenericClass<T>.TGenericInternalClass<I, K>	Create
+N	TGenericClass<T>.TGenericInternalClass<I, K>	Destroy
+N	TGenericClass<T>.TGenericInternalClass<I, K>	CopyTo<J>
+N	TInternalClass	Init
+N	TInternalClass	SetValue
+N	TEnumHelper	ToString
+N	TEnumHelper	FromString
+N	TStdClassHelper	AsString
+N	TStdClassHelper	FromString

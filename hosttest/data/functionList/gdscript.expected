@@ -1,0 +1,9 @@
+L	my_func(arg1 : int = sin(1), arg2 : String = "") -> void
+L	some_function(param1, param2, param3)
+L	something(p1, p2)
+L	other_something(p1, p2)
+L	_init()
+N	Something	inner_function()
+N	Something	my_func(arg1 : int = sin(1), arg2 : String = "") -> void
+N	fish	_init()
+N	fish	_randomize()

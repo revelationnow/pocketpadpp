@@ -72,6 +72,11 @@ Application:
 - "ANSI" always means Windows-1252.
 - A file opened through "Open with" may not reopen in the next session, because Android only lends
   that permission for a while. Files opened with Open do reopen.
-- Themes are chosen as a whole; there is no style configurator or preferences screen yet.
+- Macros record typing, caret movement and editing keys, but not menu commands.
+- The Style Configurator changes colours and bold / italic / underline; a font is chosen for the whole
+  editor, not per style.
+- Monitoring checks the file every two seconds and only for the tab on screen.
+- The system file pickers (sessions, digests of files, the Find in Files folder, theme import) are not
+  driven by the automated walkthrough; what happens with the picked file is.
 
 See [FEATURES.md](FEATURES.md) for every Notepad++ command and its status.

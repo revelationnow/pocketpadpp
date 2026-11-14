@@ -1,0 +1,7 @@
+L	setenv
+L	action_needed
+L	canonicalize_path
+L	make_module
+L	db2_name
+L	versioned_copy
+L	error_exit

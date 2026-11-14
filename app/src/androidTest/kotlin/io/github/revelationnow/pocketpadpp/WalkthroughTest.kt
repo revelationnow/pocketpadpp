@@ -176,6 +176,12 @@ class WalkthroughTest {
         throw AssertionError("Menu has no row \"$label\"")
     }
 
+    /** A row of the side panel, waited for because folders and function lists are read in the background. */
+    private fun panelRow(label: String): UiObject2 {
+        val list = device.wait(Until.findObject(By.clazz("android.widget.ScrollView")), 4000) ?: throw AssertionError("No panel is open")
+        return list.wait(Until.findObject(By.text(label)), 8000) ?: throw AssertionError("The panel has no row \"$label\"")
+    }
+
     private fun openMenu(vararg path: String) {
         tapDescribed("Menu")
         for (step in path) menu(step)
@@ -1905,6 +1911,100 @@ class WalkthroughTest {
         shot("selection-toolbar")
         device.pressBack()
         onUi { it.editor.send(Sci.SCI_SETSAVEPOINT) }
+    }
+
+    @Test
+    fun documentListAndFolderAsWorkspace() {
+        fun active() = onUi { it.workspace.active.name }
+        val project = File(context.cacheDir, "project").apply {
+            deleteRecursively()
+            File(this, "src").mkdirs()
+            File(this, "readme.txt").writeText("About this project\n")
+            File(this, "src/tool.py").writeText("def run():\n    return 1\n")
+        }
+        try {
+            // Document List: the open documents, to switch between.
+            tap("New")
+            tap("New")
+            openMenu("View", "Document List")
+            panelRow("new 1")
+            shot("document-list")
+            panelRow("new 1").click()
+            device.waitForIdle()
+            assertEquals("new 1", active())
+            assertTrue("the panel closes after a choice", device.wait(Until.gone(By.desc("Close panel")), 3000) == true)
+
+            // Folder as Workspace: a tree of the folder, whose files open with a tap.
+            onUi { it.addWorkspaceFolder(Uri.fromFile(project)) }
+            panelRow("readme.txt")
+            panelRow("src").click()
+            panelRow("tool.py")
+            shot("folder-as-workspace")
+            panelRow("tool.py").click()
+            waitUntil("the file from the tree to open") { active() == "tool.py" }
+            assertEquals("def run():\n    return 1\n", text())
+            assertTrue("with its language", onScreen("Python"))
+
+            // The folder is remembered, both pages share the panel, and a long press removes the folder.
+            scenario.close()
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            device.waitForIdle()
+            assertEquals(listOf(Uri.fromFile(project)), onUi { it.workspaceFolders() })
+            openMenu("View", "Folder as Workspace")
+            panelRow("project")
+            tap("Documents")
+            panelRow("tool.py")
+            tap("Folders")
+            panelRow("project").longClick()
+            device.waitForIdle()
+            tap("Remove from Workspace")
+            assertEquals(emptyList<Uri>(), onUi { it.workspaceFolders() })
+            shot("folder-removed")
+            tapDescribed("Close panel")
+        } finally {
+            project.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun functionList() {
+        // Notepad++'s rules are written for another regular expression engine; this device's must take them all.
+        // (The one exception has a bracket missing in Notepad++'s own file.)
+        assertEquals(listOf("fortran77.xml: 1 skipped"), onUi { it.functionListProblems() })
+
+        val python = "import os\n\n\ndef first(a, b):\n    return a\n\n\nclass Shop:\n    def open(self):\n        pass\n\n" +
+            "    def close(self):\n        pass\n" + "\n".repeat(70) + "def last():\n    pass\n"
+        setText(python, "python")
+        openMenu("View", "Function List")
+        panelRow("first(a, b)")
+        panelRow("Shop")
+        panelRow("close(self)")
+        shot("function-list-python")
+        panelRow("last()").click()
+        device.waitForIdle()
+        val line = python.substring(0, python.indexOf("def last")).count { it == '\n' }.toLong()
+        waitUntil("the caret to go to the function") { sci(Sci.SCI_LINEFROMPOSITION, sci(Sci.SCI_GETCURRENTPOS)) == line }
+        assertTrue("the function was scrolled into view", sci(Sci.SCI_GETFIRSTVISIBLELINE) > 20)
+
+        val c = "#include <stdio.h>\n\n/* int hidden(void) { } */\nstatic int add(int a, int b)\n{\n    return a + b;\n}\n\nint main(void)\n{\n    return add(1, 2);\n}\n"
+        setText(c, "c")
+        openMenu("View", "Function List")
+        panelRow("add")
+        panelRow("main")
+        assertTrue("a function inside a comment is not listed", device.findObject(By.text("hidden")) == null)
+        tap("Sort: as written")
+        assertTrue(onScreen("Sort: A\u2013Z"))
+        shot("function-list-c")
+        tap("Documents")
+        tap("Functions")
+        panelRow("main").click()
+        device.waitForIdle()
+        assertEquals(8L, sci(Sci.SCI_LINEFROMPOSITION, sci(Sci.SCI_GETCURRENTPOS)))
+
+        setText("just words", "normal")
+        openMenu("View", "Function List")
+        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("Notepad\\+\\+ has no function list rules.*"))), 5000) == true)
+        tapDescribed("Close panel")
     }
 
     /** Screens for the README: a realistic file in a few looks, without the keyboard covering half of it. */

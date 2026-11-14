@@ -32,6 +32,10 @@ import android.widget.Toast
 import io.github.revelationnow.pocketpadpp.app.Doc
 import io.github.revelationnow.pocketpadpp.app.FileIo
 import io.github.revelationnow.pocketpadpp.app.FindBar
+import io.github.revelationnow.pocketpadpp.app.FolderNode
+import io.github.revelationnow.pocketpadpp.app.FolderTree
+import io.github.revelationnow.pocketpadpp.app.PanelSpec
+import io.github.revelationnow.pocketpadpp.app.SidePanel
 import io.github.revelationnow.pocketpadpp.app.LoadedFile
 import io.github.revelationnow.pocketpadpp.app.MenuSheet
 import io.github.revelationnow.pocketpadpp.app.Palette
@@ -40,6 +44,8 @@ import io.github.revelationnow.pocketpadpp.app.TabStrip
 import io.github.revelationnow.pocketpadpp.app.Workspace
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.EditorOptions
+import io.github.revelationnow.pocketpadpp.core.FunctionEntry
+import io.github.revelationnow.pocketpadpp.core.FunctionParser
 import io.github.revelationnow.pocketpadpp.core.KeyBinding
 import io.github.revelationnow.pocketpadpp.core.ShortcutTable
 import io.github.revelationnow.pocketpadpp.core.Shortcuts
@@ -915,6 +921,17 @@ class MainActivity : Activity() {
                 }
             }
 
+            REQUEST_WORKSPACE_FOLDER -> data.data?.let { tree ->
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        tree, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                } catch (e: Exception) {
+                    // The folder stays usable until the app is closed.
+                }
+                addWorkspaceFolder(tree)
+            }
+
             REQUEST_FIND_FOLDER -> data.data?.let { tree ->
                 try {
                     contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -1056,6 +1073,11 @@ class MainActivity : Activity() {
         item("Save All") { saveAll() }
         item("Close") { requestClose(workspace.active) }
         item("Close All") { closeMany(workspace.docs.toList()) }
+        sub("Open Containing Folder") {
+            item("Explorer", enabled = doc.uri != null) { showInFileManager(doc.uri?.let { FolderTree.parentOf(it) }) }
+            item("Folder as Workspace", enabled = doc.uri != null) { pickWorkspaceFolder(doc.uri) }
+        }
+        item("Open Folder as Workspace...") { pickWorkspaceFolder(null) }
         item("Open in Default Viewer", enabled = doc.uri != null) { viewInAnotherApp(doc, null) }
         item("Rename...") { renameFile() }
         item("Delete from Storage", enabled = doc.uri != null) { deleteFile() }
@@ -1213,6 +1235,7 @@ class MainActivity : Activity() {
         }
         sub("On Selection") {
             item("Open File") { openSelectedFile() }
+            item("Open Containing Folder in Explorer") { showInFileManager(folderOfSelectedPath()) }
             item("Search on Internet") { searchOnInternet() }
             item("Redact Selection") { if (!EditOps.redactSelection(editor)) toast("Select some text first") }
             sub("Change Search Engine...") { searchEngineItems() }
@@ -1408,6 +1431,9 @@ class MainActivity : Activity() {
         sub("Unfold Level") {
             for (level in 1..8) item(level.toString()) { EditOps.foldLevel(editor, level, collapse = false) }
         }
+        item("Folder as Workspace") { showSidePanel(PANEL_FOLDERS) }
+        item("Document List") { showSidePanel(PANEL_DOCUMENTS) }
+        item("Function List") { showSidePanel(PANEL_FUNCTIONS) }
         item("Summary...") { showSummary() }
     }
 
@@ -2745,6 +2771,287 @@ class MainActivity : Activity() {
     }
 
     /** On Selection > Open File: the selection as a file path, a content or file address, or a web link. */
+    // region Side panel: Document List and Folder as Workspace
+
+    private var sidePanel: SidePanel? = null
+    private val expandedFolders = HashSet<String>()
+    private val folderContents = HashMap<String, List<FolderNode>>()
+    private val foldersLoading = HashSet<String>()
+    private val folderRoots = HashMap<String, FolderNode>()
+
+    internal fun showSidePanel(page: String) {
+        sidePanel?.dismiss()
+        // Read again each time the panel opens: the text may have changed since.
+        functionListing = null
+        sidePanel = SidePanel(themed, palette.dark).also { panel ->
+            panel.show(
+                listOf(
+                    SidePanel.Page(PANEL_DOCUMENTS) { documentRows() },
+                    SidePanel.Page(PANEL_FOLDERS) { folderRows() },
+                    SidePanel.Page(PANEL_FUNCTIONS) { functionRows() },
+                ),
+                page,
+            )
+        }
+    }
+
+    /** Notepad++'s Document List: every open document, the one on screen in bold. A long press gives the tab's menu. */
+    private fun PanelSpec.documentRows() {
+        for (doc in workspace.docs.toList()) {
+            val mark = when {
+                workspace.isDirty(doc) -> "\u25CF"
+                doc.pinned -> "\uD83D\uDCCC"
+                else -> ""
+            }
+            row(doc.name, mark = mark, strong = doc === workspace.active, onLongClick = {
+                sidePanel?.dismiss()
+                showTabMenu(doc)
+            }) {
+                sidePanel?.dismiss()
+                workspace.activate(doc)
+            }
+        }
+    }
+
+    // region Function List
+
+    // Notepad++'s function list rules by language name; null for a language that has none.
+    private val functionParsers = HashMap<String, FunctionParser?>()
+
+    private class FunctionListing(val doc: Doc, val entries: List<Pair<FunctionEntry, Long>>, val note: String)
+
+    private var functionListing: FunctionListing? = null
+    private var functionRun = 0
+    private var functionsSorted = false
+
+    private fun functionParser(language: String): FunctionParser? = functionParsers.getOrPut(language) {
+        try {
+            assets.open("npp/functionList/$language.xml").use { FunctionParser.load(it) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** For the on-device tests: the rule files this device's regular expression engine cannot use in full. */
+    internal fun functionListProblems(): List<String> =
+        (assets.list("npp/functionList") ?: emptyArray()).sorted().mapNotNull { file ->
+            val parser = functionParser(file.removeSuffix(".xml"))
+            when {
+                parser == null -> "$file: unusable"
+                parser.skipped > 0 -> "$file: ${parser.skipped} skipped"
+                else -> null
+            }
+        }
+
+    /** Reads the functions of the document on screen, in the background, and shows them when done. */
+    private fun loadFunctions() {
+        val doc = workspace.active
+        val run = ++functionRun
+        val language = doc.language
+        val length = editor.send(Sci.SCI_GETLENGTH)
+        if (length > MAX_FUNCTION_LIST_BYTES) {
+            functionListing = FunctionListing(doc, emptyList(), "This document is too large for the function list.")
+            return
+        }
+        val text = editor.text
+        functionListing = FunctionListing(doc, emptyList(), "Reading\u2026")
+        io.execute {
+            val parser = functionParser(language.name)
+            var note = ""
+            val entries = ArrayList<Pair<FunctionEntry, Long>>()
+            if (parser == null) {
+                note = "Notepad++ has no function list rules for ${language.display}."
+            } else {
+                try {
+                    val found = parser.parse(text).filter { it.name.isNotBlank() }
+                    // Scintilla counts in bytes of UTF-8, the parser in characters.
+                    var at = 0
+                    var bytes = 0L
+                    for (entry in found.sortedBy { it.position }) {
+                        bytes += text.substring(at, entry.position).toByteArray(Charsets.UTF_8).size
+                        at = entry.position
+                        entries += entry to bytes
+                    }
+                    val order = found.withIndex().associate { it.value to it.index }
+                    entries.sortBy { order[it.first] }
+                    if (entries.isEmpty()) note = "No functions found."
+                } catch (e: Throwable) {
+                    note = "The function list rules took too long on this document."
+                }
+            }
+            ui.post {
+                if (destroyed || run != functionRun) return@post
+                functionListing = FunctionListing(doc, entries, note)
+                sidePanel?.refresh()
+            }
+        }
+    }
+
+    /** Notepad++'s Function List: the functions of the document, grouped by class, each a tap away. */
+    private fun PanelSpec.functionRows() {
+        val doc = workspace.active
+        var listing = functionListing
+        if (listing == null || listing.doc !== doc) {
+            loadFunctions()
+            listing = functionListing
+        }
+        action("Reload") { loadFunctions(); sidePanel?.refresh() }
+        action(if (functionsSorted) "Sort: A\u2013Z" else "Sort: as written") {
+            functionsSorted = !functionsSorted
+            sidePanel?.refresh()
+        }
+        row(doc.name, mark = "\u25BE", strong = true)
+        if (listing == null) return
+        if (listing.note.isNotEmpty()) row(listing.note, depth = 1, dimmed = true)
+        fun tidy(name: String) = name.replace(Regex("\\s+"), " ").trim()
+        fun sorted(entries: List<Pair<FunctionEntry, Long>>) =
+            if (functionsSorted) entries.sortedBy { tidy(it.first.name).lowercase() } else entries
+        fun leaf(entry: Pair<FunctionEntry, Long>, depth: Int) = row(tidy(entry.first.name), depth) {
+            sidePanel?.dismiss()
+            goToFunction(doc, entry.second)
+        }
+        // Classes first appear where their first function does, as in Notepad++'s tree.
+        val shown = HashSet<String>()
+        for (entry in sorted(listing.entries)) {
+            val owner = entry.first.owner
+            if (owner.isEmpty()) leaf(entry, 1) else if (shown.add(owner)) {
+                row(tidy(owner), depth = 1, mark = "\u25BE", strong = true)
+                for (member in sorted(listing.entries.filter { it.first.owner == owner })) leaf(member, 2)
+            }
+        }
+    }
+
+    private fun goToFunction(doc: Doc, position: Long) {
+        if (doc !== workspace.active) return
+        val line = editor.send(Sci.SCI_LINEFROMPOSITION, position.coerceAtMost(editor.send(Sci.SCI_GETLENGTH)))
+        editor.send(Sci.SCI_ENSUREVISIBLE, line)
+        editor.send(Sci.SCI_GOTOPOS, position)
+        // The function goes near the top of the screen, with a line or two of what comes before it.
+        editor.send(Sci.SCI_SETFIRSTVISIBLELINE, (editor.send(Sci.SCI_VISIBLEFROMDOCLINE, line) - 2).coerceAtLeast(0))
+        updateStatus()
+    }
+
+    // endregion
+
+    internal fun workspaceFolders(): List<Uri> =
+        (prefs.getString("workspaceFolders", "") ?: "").split('\n').filter { it.isNotEmpty() }.map { Uri.parse(it) }
+
+    /** Notepad++'s Folder as Workspace: the folders that were added, as a tree whose files open with a tap. */
+    private fun PanelSpec.folderRows() {
+        action("Add Folder...") { pickWorkspaceFolder(null) }
+        val roots = workspaceFolders()
+        if (roots.isEmpty()) row("Add a folder to browse its files here.", dimmed = true)
+        for (picked in roots) {
+            val root = folderRoots.getOrPut(picked.toString()) { FolderTree.root(this@MainActivity, picked) }
+            folderRow(root, 0, picked)
+        }
+    }
+
+    private fun PanelSpec.folderRow(node: FolderNode, depth: Int, picked: Uri?) {
+        val key = node.uri.toString()
+        if (!node.isFolder) {
+            row(node.name, depth) {
+                sidePanel?.dismiss()
+                openUris(listOf(node.uri))
+            }
+            return
+        }
+        val open = key in expandedFolders
+        row(node.name, depth, mark = if (open) "\u25BE" else "\u25B8", onLongClick = picked?.let { { folderMenu(it, node) } }) {
+            if (open) expandedFolders -= key else {
+                expandedFolders += key
+                loadFolder(node.uri, again = false)
+            }
+            sidePanel?.refresh()
+        }
+        if (!open) return
+        val children = folderContents[key]
+        when {
+            children == null -> row("Loading\u2026", depth + 1, dimmed = true)
+            children.isEmpty() -> row("(empty)", depth + 1, dimmed = true)
+            else -> for (child in children) folderRow(child, depth + 1, null)
+        }
+    }
+
+    private fun loadFolder(folder: Uri, again: Boolean) {
+        val key = folder.toString()
+        if ((!again && key in folderContents) || !foldersLoading.add(key)) return
+        io.execute {
+            val children = FolderTree.children(this, folder)
+            ui.post {
+                foldersLoading -= key
+                folderContents[key] = children
+                if (!destroyed) sidePanel?.refresh()
+            }
+        }
+    }
+
+    private fun folderMenu(picked: Uri, root: FolderNode) = showMenu(root.name) {
+        item("Refresh") {
+            for (key in expandedFolders.toList()) loadFolder(Uri.parse(key), again = true)
+        }
+        if (picked.scheme == "content") {
+            item("Find in Files...") {
+                sidePanel?.dismiss()
+                prefs.edit().putString("findFolder", picked.toString()).apply()
+                findInFilesDialog()
+            }
+        }
+        item("Remove from Workspace") {
+            prefs.edit().putString("workspaceFolders", workspaceFolders().filter { it != picked }.joinToString("\n")).apply()
+            folderRoots.remove(picked.toString())
+            sidePanel?.refresh()
+        }
+    }
+
+    /** Asks for a folder to add. With a document given, the picker starts where that document is. */
+    private fun pickWorkspaceFolder(near: Uri?) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        if (near != null && near.scheme == "content") intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI, near)
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQUEST_WORKSPACE_FOLDER)
+        } catch (e: Exception) {
+            toast("No folder picker is available")
+        }
+    }
+
+    internal fun addWorkspaceFolder(picked: Uri) {
+        val folders = workspaceFolders()
+        if (picked !in folders) prefs.edit().putString("workspaceFolders", (folders + picked).joinToString("\n")).apply()
+        val root = folderRoots.getOrPut(picked.toString()) { FolderTree.root(this, picked) }
+        expandedFolders += root.uri.toString()
+        loadFolder(root.uri, again = true)
+        showSidePanel(PANEL_FOLDERS)
+    }
+
+    /** Shows a folder in the system's file manager. */
+    private fun showInFileManager(folder: Uri?) {
+        if (folder == null) return toast("Android only tells where a file is for files on the device's own storage")
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW).setDataAndType(folder, android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            )
+        } catch (e: Exception) {
+            toast("No file manager can show this folder")
+        }
+    }
+
+    /** The folder of the path that is selected, when it is on the device's storage; otherwise that of the current file. */
+    private fun folderOfSelectedPath(): Uri? {
+        val text = EditOps.selectionOrWord(editor).trim()
+        for (prefix in listOf("/storage/emulated/0/", "/sdcard/")) {
+            if (text.startsWith(prefix)) {
+                val parent = text.removePrefix(prefix).trimEnd('/').substringBeforeLast('/', "")
+                return android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$parent")
+            }
+        }
+        return workspace.active.uri?.let { FolderTree.parentOf(it) }
+    }
+
+    // endregion
+
     private fun openSelectedFile() {
         val text = EditOps.selectionOrWord(editor).trim()
         when {
@@ -2885,6 +3192,11 @@ class MainActivity : Activity() {
         const val REQUEST_SAVE_SESSION = 5
         const val REQUEST_FIND_FOLDER = 6
         const val REQUEST_IMPORT_THEME = 7
+        const val REQUEST_WORKSPACE_FOLDER = 8
+        const val PANEL_DOCUMENTS = "Documents"
+        const val PANEL_FOLDERS = "Folders"
+        const val PANEL_FUNCTIONS = "Functions"
+        const val MAX_FUNCTION_LIST_BYTES = 3L * 1024 * 1024
         const val COMMAND_SEPARATOR = " > "
 
         /** Font families every Android device has. */

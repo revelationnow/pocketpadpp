@@ -23,7 +23,7 @@ if command -v kotlinc >/dev/null 2>&1; then
     kotlinc -nowarn -jvm-target 17 -cp "$build/classes" -d "$build/core-tests.jar" -include-runtime \
         "$root"/app/src/main/kotlin/io/github/revelationnow/pocketpadpp/core/*.kt "$here"/kotlin/*.kt
     java -Djava.awt.headless=true -Djava.library.path="$build" \
-        -cp "$build/core-tests.jar:$build/classes" host.CoreTestsKt "$root/app/src/main/assets/npp"
+        -cp "$build/core-tests.jar:$build/classes" host.CoreTestsKt "$root/app/src/main/assets/npp" "$root/hosttest/data/functionList"
 else
     echo "kotlinc not found: skipping the Kotlin core tests" >&2
 fi

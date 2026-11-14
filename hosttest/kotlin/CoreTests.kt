@@ -2,6 +2,9 @@ package host
 
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.EditorOptions
+import io.github.revelationnow.pocketpadpp.core.BoostPattern
+import io.github.revelationnow.pocketpadpp.core.FunctionEntry
+import io.github.revelationnow.pocketpadpp.core.FunctionParser
 import io.github.revelationnow.pocketpadpp.core.KeyBinding
 import io.github.revelationnow.pocketpadpp.core.ShortcutTable
 import io.github.revelationnow.pocketpadpp.core.Shortcuts
@@ -816,6 +819,68 @@ private fun testSettings(registry: LanguageRegistry, theme: NppTheme) {
     eq(1L, sci.send(Sci.SCI_STYLEGETITALIC, keyword.styleId.toLong()), "and the changed font style")
 }
 
+/** Notepad++'s own function list tests: its source files must give the lists it expects for them. */
+private fun testFunctionList(assets: File, data: File) {
+    fun escape(text: String) = text.replace("\\", "\\\\").replace("\r\n", "\n").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    fun canonical(entries: List<FunctionEntry>): String {
+        val lines = ArrayList<String>()
+        for (entry in entries) if (entry.owner.isEmpty()) lines += "L\t" + escape(entry.name)
+        for (owner in entries.map { it.owner }.filter { it.isNotEmpty() }.distinct()) {
+            for (entry in entries) if (entry.owner == owner) lines += "N\t" + escape(owner) + "\t" + escape(entry.name)
+        }
+        return lines.joinToString("\n") + "\n"
+    }
+
+    val rules = File(assets, "functionList").listFiles { f -> f.name.endsWith(".xml") }!!.sortedBy { it.name }
+    ok(rules.size >= 45, "function list rules are bundled (${rules.size})")
+    val unusable = rules.filter { file -> file.inputStream().use { FunctionParser.load(it) }.let { it == null || it.skipped > 0 } }.map { it.name }
+    // fortran77.xml has an unbalanced bracket in its comment expression, which Notepad++ cannot read either.
+    eq(listOf("fortran77.xml"), unusable, "every function list expression of Notepad++ can be used, but the one that is broken there too")
+
+    val sources = data.listFiles { f -> f.name.endsWith(".txt") }!!.sortedBy { it.name }
+    ok(sources.size >= 35, "Notepad++'s function list tests are present (${sources.size})")
+    for (source in sources) {
+        val language = source.name.removeSuffix(".txt")
+        val parser = File(assets, "functionList/$language.xml").inputStream().use { FunctionParser.load(it) }!!
+        // Notepad++ runs these tests on Windows, where the files have CR LF line endings.
+        val text = source.readText(Charsets.UTF_8).replace("\r\n", "\n").replace("\n", "\r\n")
+        val expected = File(data, "$language.expected").readText(Charsets.UTF_8)
+        eq(expected, canonical(parser.parse(text, 30000)), "function list of the $language test file")
+    }
+
+    // The same rules on text with Unix line endings, and where a function is on screen.
+    val python = File(assets, "functionList/python.xml").inputStream().use { FunctionParser.load(it) }!!
+    val code = "import os\n\ndef first(a, b):\n    return a\n\nclass Shop:\n    def open(self):\n        pass\n\n    def close(self):\n        pass\n\ndef last():\n    pass\n"
+    val entries = python.parse(code)
+    eq(listOf("first(a, b)" to "", "open(self)" to "Shop", "close(self)" to "Shop", "last()" to ""), entries.map { it.name to it.owner }.sortedBy { e -> entries.first { it.name == e.first }.position }, "python functions and methods")
+    eq(code.indexOf("first"), entries.first { it.name == "first(a, b)" }.position, "an entry knows where its function is")
+    eq("Python", python.displayName, "the rules carry a display name")
+
+    // Pieces of Boost syntax that have to be rewritten.
+    fun find(expression: String, text: String): String? = BoostPattern.compile(expression)?.find(text, 0, text.length)?.let { text.substring(it[0], it[1]) }
+    eq("bar", find("foo\\Kbar", "xfoobar"), "\\K drops what was matched before it")
+    eq("b]c", find("[]b]+c", "a b]c"), "a ] first in a class is a literal")
+    eq("a[b", find("a[[]b", "xa[b"), "a [ inside a class is a literal")
+    eq("x{y}", find("x{y}", "ax{y}"), "braces that are no quantifier are literals")
+    eq("aaa", find("a{2,3}", "baaaa".substring(0, 4)), "quantifier braces still count")
+    eq("ab12", find("[[:alpha:]]+[[:digit:]]+", "- ab12 -"), "POSIX class names")
+    eq("fooBAR", find("(?'word'foo)(?&word)?bar", "x fooBAR"), "named groups, and case is ignored")
+    eq("abab", find("(?'P'ab)(?&P)", "xabab"), "a group can be called as a subroutine")
+    eq("(a(b)c)", find("\\((?:[^()]++|(?R))*\\)", "x(a(b)c)y"), "recursion, a few levels deep")
+    eq("1:x", find("(\\d:)?(?(1)x|y)", "1:x"), "condition on a group that matched")
+    eq("y", find("(\\d:)?(?(1)x|y)", "zy"), "condition on a group that did not match")
+    eq("ab", find("(?(?=a)ab|cd)", "ab"), "condition on a lookahead, first branch")
+    eq("cd", find("(?(?=a)ab|cd)", "cd"), "condition on a lookahead, second branch")
+    eq("ab", find("(?x) a  # the first letter\n b", "xab"), "free-spacing mode with a comment")
+    eq("a b", find("(?x) a [ ] b", "a b"), "a blank inside a class counts in free-spacing mode")
+    eq(null, find("x*", "abc"), "a match of nothing is no match")
+    eq(null, BoostPattern.compile("(unbalanced"), "an expression that cannot be read is turned down")
+    eq(
+        "<a b=\"1&#10;2&#9;3\"><!-- \"\n --></a>", FunctionParser.keepLineBreaks("<a b=\"1\n2\t3\"><!-- \"\n --></a>"),
+        "line breaks inside attribute values are kept for the XML reader",
+    )
+}
+
 fun main(args: Array<String>) {
     val assets = File(args.firstOrNull() ?: "app/src/main/assets/npp")
     ScintillaNative.init(HostPlatform(), 2.0f, 48f)
@@ -828,6 +893,7 @@ fun main(args: Array<String>) {
     testMoreEditOps()
     testSession()
     testSettings(registry, theme)
+    testFunctionList(assets, File(args.getOrNull(1) ?: "hosttest/data/functionList"))
     println("core: ${checks - failures}/$checks checks passed")
     exitProcess(if (failures == 0) 0 else 1)
 }

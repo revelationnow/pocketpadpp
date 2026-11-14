@@ -42,7 +42,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 
 ## What works today
 
-404 of the 481 commands in Notepad++'s menus are implemented. In short:
+438 of the 481 commands in Notepad++'s menus are implemented. In short:
 
 **Editing**
 - Syntax highlighting and folding for 94 languages, with Notepad++'s keywords and file extensions
@@ -58,6 +58,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 **Files**
 - Tabs, with a session that brings back open files and unsaved text after the app is closed
 - Open, save, save as, save a copy, reload, recent files, and "Open with" from other apps
+- Pinned tabs, monitoring a log file as it grows (tail -f), printing and saving as PDF through Android's print screen
 - UTF-8, UTF-8 with BOM, UTF-16 LE/BE and ANSI, detected on load and kept on save, plus 46 character sets to choose from
 - Windows, Unix and old Mac line endings, shown and convertible from the status bar
 
@@ -68,12 +69,26 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - Marks: highlight every occurrence in one of five colours, jump between them, copy them;
   mark everything a search finds and bookmark those lines
 - Bookmarks, with cut, copy, replace and remove for all bookmarked lines at once
+- Find All in the current document or in every open one, and Find in Files over a folder with file filters,
+  with a results panel that jumps to each hit
 
 **View**
 - Notepad++'s default theme, dark mode and 22 further themes; the app around the editor turns light or dark to match
 - Word wrap, show spaces / tabs / line endings / indent guides, zoom, line numbers, fold levels
 - Hide lines, full screen and distraction free mode
 - Document summary
+
+**Macros and Run**
+- Record typing and editing keys, play the recording back once, a number of times or to the end of the file,
+  and save macros under a name
+- Run opens an address with the current word or file name filled in
+
+**Settings**
+- Preferences for tab size, spaces instead of tabs, auto-indent, caret, vertical edge, and the line ending
+  and encoding of new documents
+- Shortcut Mapper: any menu command can be given a shortcut, and the menus show them
+- Style Configurator: the font, and the colours and font style of any style in the theme
+- Import Notepad++ theme files, and choose extra commands for the selection toolbar
 
 **Tools and windows**
 - MD5, SHA-1, SHA-256 and SHA-512 of a text, of files, or of the selection
@@ -94,7 +109,8 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 
 ## Keyboard shortcuts
 
-The shortcuts are Notepad++'s defaults. Use them with the sticky keys or a Bluetooth / USB keyboard.
+The shortcuts are Notepad++'s defaults. Use them with the sticky keys or a Bluetooth / USB keyboard,
+and change them in Settings > Shortcut Mapper.
 
 | Shortcut | Command | Shortcut | Command |
 |---|---|---|---|
@@ -112,6 +128,9 @@ The shortcuts are Notepad++'s defaults. Use them with the sticky keys or a Bluet
 | Alt+0, Alt+Shift+0 | Fold all, unfold all | Alt+Shift+arrows | Column selection |
 | Alt+1…8, Alt+Shift+1…8 | Fold / unfold a level | Ctrl+arrows | Move by word |
 | Ctrl+Alt+F | Fold current level | Ctrl + `+` / `-` / `/` | Zoom in / out / reset |
+| Ctrl+Shift+F | Find in Files | F4 / Shift+F4 | Next / previous search result |
+| Ctrl+Shift+R / Ctrl+Shift+P | Record / play a macro | F7 | Search results panel |
+| Ctrl+P | Print | F5 | Run |
 | Alt+F / E / S / V / N / L / T | Open the File / Edit / Search / View / Encoding / Language / Settings menu | | |
 
 ## Install
@@ -129,12 +148,11 @@ The [feature map](docs/FEATURES.md) lists every Notepad++ command with its statu
 
 | Area | Planned |
 |---|---|
-| Search | Find in all open files and in folders with a results panel, Notepad++'s regular expression syntax |
-| Panels | Document list, function list, document map, folder as workspace, split view, auto-completion |
-| Customisation | Preferences, style configurator, shortcut mapper, user-defined languages |
-| Tools | Macros, run commands, hashes, printing |
-
-Not planned: Notepad++ plugins. They are Windows libraries and cannot run on Android.
+| Panels | Document list, function list, document map, folder as workspace, project panels, split view |
+| Editing | Auto-completion and function hints |
+| Languages | User-defined languages |
+| Search | Notepad++'s regular expression syntax |
+| Plugins | Notepad++ plugins are Windows libraries and cannot run as they are. A plugin system that builds from source is planned, starting with a hex editor and a compare tool |
 
 Known gaps in what exists are listed in [docs/TESTING.md](docs/TESTING.md#known-gaps). The ones you are most
 likely to meet: regular expressions use ECMAScript syntax for now (no lookbehind), folds are not remembered
