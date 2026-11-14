@@ -6,7 +6,7 @@ all of them run on every push (see `.github/workflows/android.yml`).
 | Tests | Where they run | What they cover |
 |---|---|---|
 | Native layer (`hosttest/run.sh`) | Desktop JVM | The C++ platform layer: drawing calls, keyboard composition, undo grouping, big files |
-| Core (`hosttest/kotlin/CoreTests.kt`) | Desktop JVM | Encodings, line endings, Notepad++ language and theme import, search, every edit command, sessions |
+| Core (`hosttest/kotlin/CoreTests.kt`) | Desktop JVM | Encodings, line endings, Notepad++ language and theme import, search, every edit command, sessions, shortcuts, style changes, auto-completion, and the function list against Notepad++'s own test files for 37 languages |
 | Walkthrough (`app/src/androidTest`) | Android emulator | The real app, driven like a person would: see below |
 
 ## The emulator walkthrough
@@ -35,7 +35,19 @@ and saves a screenshot at every step. It covers:
   the clipboard history and the search engine choice
 - Find All in open documents and Find in Files, with the results panel and moving between hits
 - recording a macro, playing it back, running it to the end of the file, saving it
+- pinned tabs, monitoring a file another program appends to, binary copy and paste, Run, and Print
+- Preferences (tab size, spaces, edge line, caret, new document line ending and encoding), and that they last
+- the Shortcut Mapper: a new shortcut pressed on a keyboard, taking over one that is in use, using both,
+  the shortcuts shown in the menus, and Reset All
+- the Style Configurator, importing a theme file, and extra commands in the selection toolbar
+- the side panel: Document List, Folder as Workspace over a real folder tree, and the Function List for
+  Python and C, including that this device's regular expression engine accepts every Notepad++ rule
+- auto-completion from the document and from the language's functions, parameter hints, path completion
 - highlighting for C++, Python, HTML and JSON
+
+Long menus are not swiped through: the test asks the app to bring the wanted row on screen and then taps
+it, which keeps the run to a reasonable length. Each test has a time limit, and a run that is cut off
+still publishes the screenshots and log it got to.
 
 To run it yourself, start an emulator or plug in a phone with USB debugging and run `tools/run_ui_tests.sh`.
 Screenshots, the test report and the log end up in `ui-test-output/`. CI uploads the same folder as the
@@ -60,7 +72,8 @@ Editor:
   them). With suggestions off this does not apply.
 - No magnifier while dragging the caret.
 - Right-to-left and bidirectional text are not laid out correctly.
-- Autocompletion lists and call tips are stubbed out in the platform layer.
+- Scintilla's own autocompletion lists and call tips are stubbed out in the platform layer; the app shows
+  completions and parameter hints in a row above the keyboard instead.
 - No TalkBack / accessibility support beyond labelled buttons.
 - 64-bit ABIs only.
 
@@ -73,6 +86,11 @@ Application:
 - A file opened through "Open with" may not reopen in the next session, because Android only lends
   that permission for a while. Files opened with Open do reopen.
 - Macros record typing, caret movement and editing keys, but not menu commands.
+- Function List rules are Notepad++'s, rewritten for Java's regular expressions. Recursion in a rule is
+  followed two levels deep, and a rule that takes more than four seconds on a document is given up on.
+- Path Completion only sees folders the app may list directly, which on current Android versions is little
+  more than its own storage.
+- Folder as Workspace shows and opens files; it does not create, rename or delete them.
 - The Style Configurator changes colours and bold / italic / underline; a font is chosen for the whole
   editor, not per style.
 - Monitoring checks the file every two seconds and only for the tab on screen.

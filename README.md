@@ -42,7 +42,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 
 ## What works today
 
-438 of the 481 commands in Notepad++'s menus are implemented. In short:
+451 of the 481 commands in Notepad++'s menus are implemented. In short:
 
 **Editing**
 - Syntax highlighting and folding for 94 languages, with Notepad++'s keywords and file extensions
@@ -53,6 +53,8 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - Case conversion (upper, lower, proper, sentence, invert, random), comment and uncomment,
   trimming and tab/space conversion
 - Auto-indent, brace highlighting and go to matching brace, bookmarks, read-only mode, redact selection
+- Auto-completion from the words of the document and from Notepad++'s function lists for 34 languages,
+  shown in a row above the keyboard, with hints for the parameters of the function being called
 - Unlimited undo and redo, kept per tab
 
 **Files**
@@ -77,6 +79,12 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - Word wrap, show spaces / tabs / line endings / indent guides, zoom, line numbers, fold levels
 - Hide lines, full screen and distraction free mode
 - Document summary
+
+**Panels**
+- One panel slides in from the left with a tab for each of Notepad++'s docked panels
+- Document List: every open document
+- Folder as Workspace: folders you add, as a tree whose files open with a tap
+- Function List: the functions and classes of the document, from Notepad++'s own rules for 47 languages
 
 **Macros and Run**
 - Record typing and editing keys, play the recording back once, a number of times or to the end of the file,
@@ -104,6 +112,7 @@ It does this by reusing what Notepad++ is made of rather than imitating it:
 - **Column selection:** hold Alt and drag.
 - **One menu, one level at a time,** with a back arrow at every level instead of nested pop-ups.
 - **A tappable status bar** for line endings, encoding, language and go to line.
+- **Completions where a keyboard shows suggestions:** in a row above the keys, not in a list under your thumb.
 - **A choice of keyboards:** suggestions and autocorrect are off by default, as they get in the way of code,
   and can be turned on in Settings for writing prose.
 
@@ -148,8 +157,7 @@ The [feature map](docs/FEATURES.md) lists every Notepad++ command with its statu
 
 | Area | Planned |
 |---|---|
-| Panels | Document list, function list, document map, folder as workspace, project panels, split view |
-| Editing | Auto-completion and function hints |
+| Panels | Document map, project panels, split view |
 | Languages | User-defined languages |
 | Search | Notepad++'s regular expression syntax |
 | Plugins | Notepad++ plugins are Windows libraries and cannot run as they are. A plugin system that builds from source is planned, starting with a hex editor and a compare tool |
