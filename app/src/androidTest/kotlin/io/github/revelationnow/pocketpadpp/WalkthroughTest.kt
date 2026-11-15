@@ -2,6 +2,9 @@ package io.github.revelationnow.pocketpadpp
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.net.Uri
 import android.os.SystemClock
@@ -9,6 +12,8 @@ import android.util.Log
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -31,6 +36,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -137,14 +143,24 @@ class WalkthroughTest {
         device.wait(Until.findObject(By.text(label)), timeout) ?: throw AssertionError("Nothing on screen says \"$label\"")
 
     private fun tap(label: String) {
-        find(label).click()
+        find(label).shownClick()
         device.waitForIdle()
+    }
+
+    /** While a recording is made, a mark shows where the finger goes. Otherwise this is a plain click. */
+    private fun UiObject2.shownClick() {
+        tapMark?.let { mark ->
+            val centre = visibleCenter
+            mark.show(centre.x.toFloat(), centre.y.toFloat())
+            SystemClock.sleep(280)
+        }
+        click()
     }
 
     private fun tapDescribed(description: String) {
         val target = device.wait(Until.findObject(By.desc(description)), 4000)
             ?: throw AssertionError("Nothing on screen is described as \"$description\"")
-        target.click()
+        target.shownClick()
         device.waitForIdle()
     }
 
@@ -169,7 +185,7 @@ class WalkthroughTest {
             device.waitForIdle()
             val row = device.wait(Until.findObject(By.clazz("android.widget.ScrollView")), 4000)?.wait(Until.findObject(By.text(label)), 2000)
             if (row != null && row.visibleBounds.height() > 10) {
-                row.click()
+                row.shownClick()
                 device.waitForIdle()
                 SystemClock.sleep(150)
                 return
@@ -181,7 +197,7 @@ class WalkthroughTest {
                 ?: throw AssertionError("No menu is open (looking for \"$label\")")
             val row = list.findObject(By.text(label))
             if (row != null && row.visibleBounds.height() > 10) {
-                row.click()
+                row.shownClick()
                 device.waitForIdle()
                 SystemClock.sleep(150)
                 return
@@ -213,7 +229,7 @@ class WalkthroughTest {
         return action()
     }
 
-    private fun panelClick(label: String) = onFreshRow { panelRow(label).click() }.also { device.waitForIdle() }
+    private fun panelClick(label: String) = onFreshRow { panelRow(label).shownClick() }.also { device.waitForIdle() }
 
     private fun panelLongClick(label: String) = onFreshRow { panelRow(label).longClick() }.also { device.waitForIdle() }
 
@@ -246,6 +262,7 @@ class WalkthroughTest {
     }
 
     private fun touch(action: Int, x: Float, y: Float, downTime: Long, eventTime: Long) {
+        if (action != MotionEvent.ACTION_UP) tapMark?.show(x, y)
         val event = MotionEvent.obtain(downTime, eventTime, action, x, y, 0)
         event.source = InputDevice.SOURCE_TOUCHSCREEN
         instrumentation.sendPointerSync(event)
@@ -2918,6 +2935,312 @@ class WalkthroughTest {
             file.delete()
         }
     }
+
+    // region Recordings for the README
+
+    /** A translucent dot over everything on screen, drawn where the test is about to touch. */
+    private class TapMark(context: Context) : View(context) {
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66FF8F00 }
+        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xDDFF8F00.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+        }
+        @Volatile private var x = 0f
+        @Volatile private var y = 0f
+        @Volatile private var until = 0L
+        private val origin = IntArray(2)
+
+        fun show(screenX: Float, screenY: Float) {
+            x = screenX
+            y = screenY
+            until = SystemClock.uptimeMillis() + 450
+            postInvalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            if (SystemClock.uptimeMillis() >= until) return
+            getLocationOnScreen(origin)
+            val radius = 46f
+            canvas.drawCircle(x - origin[0], y - origin[1], radius, fill)
+            canvas.drawCircle(x - origin[0], y - origin[1], radius, ring)
+            postInvalidateDelayed(60)
+        }
+    }
+
+    private var tapMark: TapMark? = null
+
+    /**
+     * Records the short clips shown in the README, with `screenrecord`. Not part of the walkthrough: it runs only
+     * when asked for (tools/record_demos.sh), since it proves nothing and takes its time on purpose.
+     */
+    @Test
+    fun readmeRecordings() {
+        Assume.assumeTrue("recordings are made on request only", InstrumentationRegistry.getArguments().getString("recordings") == "true")
+        val folder = "/sdcard/Download/pocketpad/recordings"
+        device.executeShellCommand("mkdir -p $folder")
+        fun pause(millis: Long = 800) = SystemClock.sleep(millis)
+        fun type(text: String, each: Long = 60) {
+            for (ch in text) {
+                onUi { it.editor.typeText(ch.toString()) }
+                SystemClock.sleep(each)
+            }
+        }
+        fun soft(text: String) = onUi { it.editor.onCreateInputConnection(EditorInfo())!!.commitText(text, 1) }
+        fun hideKeyboard() {
+            onUi { activity ->
+                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                    .hideSoftInputFromWindow(activity.editor.windowToken, 0)
+            }
+            SystemClock.sleep(900)
+        }
+        fun slowMenu(vararg path: String) {
+            tapDescribed("Menu")
+            pause(550)
+            for (step in path) {
+                menu(step)
+                pause(550)
+            }
+        }
+        // Every clip starts from a freshly installed app.
+        fun fresh() {
+            scenario.close()
+            File(context.filesDir, "session.xml").delete()
+            File(context.filesDir, "backup").deleteRecursively()
+            context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            device.waitForIdle()
+            pause(1200)
+        }
+        fun open(name: String, content: String) {
+            val file = File(context.cacheDir, name).apply { writeText(content) }
+            onUi { it.openUris(listOf(Uri.fromFile(file))) }
+            waitUntil("$name to open") { onUi { it.workspace.active.name } == name }
+        }
+        fun record(name: String, scene: () -> Unit) {
+            val running = instrumentation.uiAutomation.executeShellCommand("screenrecord --bit-rate 8000000 --time-limit 120 $folder/$name.mp4")
+            SystemClock.sleep(1500)
+            try {
+                scene()
+                pause(1200)
+            } finally {
+                device.executeShellCommand("pkill -INT screenrecord")
+                // The recorder needs a moment to finish the file.
+                SystemClock.sleep(3000)
+                running.close()
+                Log.i(TAG, "recording $name: " + device.executeShellCommand("ls -l $folder").trim())
+            }
+        }
+
+        // The mark that shows taps is a window above the app's own, which the app may open once allowed to.
+        device.executeShellCommand("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
+        try {
+            instrumentation.runOnMainSync {
+                val mark = TapMark(context.applicationContext)
+                val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, flags, PixelFormat.TRANSLUCENT,
+                )
+                (context.applicationContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(mark, params)
+                tapMark = mark
+            }
+        } catch (e: Exception) {
+            Log.i(TAG, "recording without tap marks: $e")
+        }
+
+        val python = """
+            # Inventory report for the corner shop.
+            import csv
+            from dataclasses import dataclass
+
+            LOW_STOCK = 5
+
+
+            @dataclass
+            class Item:
+                name: str
+                price: float
+                count: int
+
+                @property
+                def value(self) -> float:
+                    return self.price * self.count
+
+
+            def load(path: str) -> list[Item]:
+                with open(path, newline="") as f:
+                    rows = csv.DictReader(f)
+                    return [Item(r["name"],
+                                 float(r["price"]),
+                                 int(r["count"]))
+                            for r in rows]
+
+
+            def report(items: list[Item]) -> None:
+                for item in sorted(items, key=str):
+                    low = item.count < LOW_STOCK
+                    mark = "!" if low else " "
+                    print(mark, item.name, item.value)
+
+
+            if __name__ == "__main__":
+                report(load("stock.csv"))
+        """.trimIndent() + "\n"
+
+        try {
+            // 1. Typing code: highlighting, auto-indent, completion, a shortcut with the sticky Ctrl key, the menus.
+            fresh()
+            setText("def total(prices):\n    result = 0", "python")
+            sci(Sci.SCI_DOCUMENTEND)
+            onUi { it.editor.requestFocus() }
+            pause(800)
+            record("typing") {
+                pause(600)
+                type("\nfor p in prices:")
+                type("\n    result += p")
+                type("\nprint(p, res")
+                pause(700)
+                // The word offered above the keyboard, if it is offered.
+                val offered = device.wait(Until.findObject(By.text("result")), 1500)
+                if (offered != null) offered.shownClick() else type("ult")
+                pause(300)
+                type(")")
+                pause(800)
+                tap("Ctrl")
+                pause(500)
+                soft("d")
+                pause(1000)
+                tap("Undo")
+                pause(700)
+                slowMenu("Edit", "Line Operations", "Move Up Current Line")
+                pause(600)
+            }
+
+            // 2. Reading code: scrolling, folding, dark mode, another theme, the Function List.
+            fresh()
+            open("inventory.py", python)
+            hideKeyboard()
+            record("code") {
+                val bounds = editorBounds()
+                val x = bounds.centerX().toFloat()
+                pause(500)
+                drag(x, bounds.bottom - 300f, x, bounds.top + 500f, steps = 24)
+                pause(500)
+                drag(x, bounds.top + 500f, x, bounds.bottom - 300f, steps = 24)
+                pause(500)
+                slowMenu("View", "Fold All")
+                pause(1100)
+                slowMenu("View", "Unfold All")
+                pause(700)
+                slowMenu("Settings", "Dark mode")
+                pause(700)
+                tapDescribed("Close menu")
+                pause(1000)
+                slowMenu("Settings", "Theme", "Monokai")
+                pause(600)
+                tapDescribed("Close menu")
+                pause(1000)
+                slowMenu("View", "Function List")
+                pause(900)
+                device.wait(Until.findObject(By.textStartsWith("report")), 5000)?.shownClick()
+                pause(900)
+                device.findObject(By.desc("Close panel"))?.shownClick()
+                pause(500)
+            }
+
+            // 3. Searching and changing: find, count, replace all, and typing on several lines at once.
+            fresh()
+            open("inventory.py", python)
+            hideKeyboard()
+            record("search") {
+                pause(500)
+                tap("Find")
+                pause(500)
+                device.wait(Until.findObject(By.clazz("android.widget.EditText")), 4000)!!.text = "item"
+                pause(600)
+                tapDescribed("Find next")
+                pause(550)
+                tapDescribed("Find next")
+                pause(550)
+                tapDescribed("Count matches")
+                pause(1300)
+                tapDescribed("Close")
+                pause(400)
+                slowMenu("Search", "Replace...")
+                var fields = emptyList<UiObject2>()
+                waitUntil("the replace fields") {
+                    fields = device.findObjects(By.clazz("android.widget.EditText"))
+                    fields.size == 2
+                }
+                fields[0].text = "count"
+                pause(400)
+                fields[1].text = "quantity"
+                pause(700)
+                tapDescribed("Replace all")
+                pause(1400)
+                tapDescribed("Close")
+                pause(600)
+                // With Alt held, a drag down the lines puts a caret on each of them.
+                tap("Alt")
+                pause(500)
+                val (fromX, fromY) = pointOf(sci(Sci.SCI_FINDCOLUMN, 9, 4))
+                val (_, toY) = pointOf(sci(Sci.SCI_FINDCOLUMN, 11, 4))
+                drag(fromX, fromY, fromX, toY, steps = 18, stepDelay = 30)
+                pause(700)
+                type("# ", 180)
+                pause(900)
+            }
+
+            // 4. The plugins: Compare, the Hex Editor and Lua scripting.
+            fresh()
+            setText("milk\nbread\neggs\nbutter\napples\n")
+            tap("New")
+            setText("milk\nbread\n12 eggs\nbutter\ncheese\napples\ntea\n")
+            hideKeyboard()
+            record("plugins") {
+                pause(500)
+                slowMenu("Plugins", "Compare", "Compare")
+                waitUntil("the comparison") { onUi { it.comparisonDifferences } == 3 }
+                pause(1500)
+                tapDescribed("Next difference")
+                pause(800)
+                tapDescribed("Next difference")
+                pause(900)
+                tapDescribed("Clear compare")
+                pause(700)
+                slowMenu("Plugins", "Hex Editor", "View in HEX")
+                pause(300)
+                tapDescribed("Close menu")
+                pause(1500)
+                tapDescribed("Leave HEX view")
+                pause(600)
+                slowMenu("Plugins", "Lua Script", "Show Console")
+                pause(300)
+                tapDescribed("Close menu")
+                pause(600)
+                device.wait(Until.findObject(By.desc("Lua input")), 4000)!!.text = "editor.LineCount"
+                pause(500)
+                tapDescribed("Run Lua")
+                pause(900)
+                device.wait(Until.findObject(By.desc("Lua input")), 4000)!!.text = "editor:AppendText(os.date('%A'))"
+                pause(500)
+                tapDescribed("Run Lua")
+                pause(1300)
+            }
+        } finally {
+            tapMark?.let { mark ->
+                tapMark = null
+                instrumentation.runOnMainSync {
+                    (context.applicationContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(mark)
+                }
+            }
+            for (name in listOf("inventory.py")) File(context.cacheDir, name).delete()
+        }
+    }
+
+    // endregion
 
     private companion object {
         const val TAG = "PocketpadTest"

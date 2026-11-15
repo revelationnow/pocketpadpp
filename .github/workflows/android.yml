@@ -2,6 +2,8 @@ name: Android build
 
 on:
   push:
+    # The "recordings" branch only makes the README's clips, see recordings.yml.
+    branches-ignore: [recordings]
   pull_request:
   workflow_dispatch:
 
@@ -87,6 +89,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # For the signed statement that the APK was built here from this repository.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -97,21 +102,45 @@ jobs:
       - name: Build
         run: ./gradlew --no-daemon --stacktrace assembleRelease
       - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk pocketpadpp-dev.apk
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk pocketpadpp-dev.apk
+          sha256sum pocketpadpp-dev.apk | tee pocketpadpp-dev.apk.sha256
       - uses: actions/upload-artifact@v6
         with:
           name: pocketpadpp-dev-apk
           path: pocketpadpp-dev.apk
+      # Build provenance: GitHub signs a statement that this exact file was built by this workflow from this
+      # commit. Anyone can check a download against it with `gh attestation verify`. See README, "Checking a download".
+      - name: Attest the APK
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: pocketpadpp-dev.apk
       # A rolling pre-release gives the phone a direct download link for the newest build.
       - name: Publish rolling pre-release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sum="$(cut -d' ' -f1 pocketpadpp-dev.apk.sha256)"
+          {
+            echo "Automatic development build from \`$GITHUB_REF_NAME\` at $GITHUB_SHA. Not a store release."
+            echo
+            echo "SHA-256 of \`pocketpadpp-dev.apk\`:"
+            echo
+            echo "    $sum"
+            echo
+            echo "To check that the file was built by this repository's own workflow from that commit:"
+            echo
+            echo "    gh attestation verify pocketpadpp-dev.apk --repo $GITHUB_REPOSITORY"
+            echo
+            echo "The APK is signed with the public development key in the repository, so its signature alone does not"
+            echo "say who built it; the check above does. See the README, \"Checking a download\"."
+          } > notes.md
           gh release delete spike-latest --yes --cleanup-tag || true
           gh release delete dev-latest --yes --cleanup-tag || true
-          gh release create dev-latest pocketpadpp-dev.apk \
+          gh release create dev-latest pocketpadpp-dev.apk pocketpadpp-dev.apk.sha256 \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Development build $GITHUB_RUN_NUMBER" \
-            --notes "Automatic development build from $GITHUB_REF_NAME at ${GITHUB_SHA::7}. Signed with the public development key in the repository. Not a release."
+            --notes-file notes.md
