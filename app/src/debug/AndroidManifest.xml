@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only, which are the ones the tests run against. The published APK is the release build. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Lets the test that records the README's clips draw a mark where it taps. Never asked of users. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+</manifest>

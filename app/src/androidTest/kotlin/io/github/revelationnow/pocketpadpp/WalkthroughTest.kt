@@ -3089,6 +3089,11 @@ class WalkthroughTest {
                 report(load("stock.csv"))
         """.trimIndent() + "\n"
 
+        fun luaInput(code: String) {
+            device.wait(Until.findObject(By.desc("Lua input")), 4000)!!.text = code
+            pause(500)
+            tapDescribed("Run Lua")
+        }
         try {
             // 1. Typing code: highlighting, auto-indent, completion, a shortcut with the sticky Ctrl key, the menus.
             fresh()
@@ -3097,7 +3102,7 @@ class WalkthroughTest {
             onUi { it.editor.requestFocus() }
             pause(800)
             record("typing") {
-                pause(600)
+                pause(400)
                 type("\nfor p in prices:")
                 type("\n    result += p")
                 type("\nprint(p, res")
@@ -3109,53 +3114,41 @@ class WalkthroughTest {
                 type(")")
                 pause(800)
                 tap("Ctrl")
-                pause(500)
+                pause(450)
                 soft("d")
+                pause(1100)
+                slowMenu("Edit", "Comment/Uncomment", "Toggle Single Line Comment")
                 pause(1000)
-                tap("Undo")
-                pause(700)
-                slowMenu("Edit", "Line Operations", "Move Up Current Line")
-                pause(600)
             }
 
-            // 2. Reading code: scrolling, folding, dark mode, another theme, the Function List.
+            // 2. Reading code: folding, dark mode, the Function List.
             fresh()
             open("inventory.py", python)
             hideKeyboard()
             record("code") {
-                val bounds = editorBounds()
-                val x = bounds.centerX().toFloat()
-                pause(500)
-                drag(x, bounds.bottom - 300f, x, bounds.top + 500f, steps = 24)
-                pause(500)
-                drag(x, bounds.top + 500f, x, bounds.bottom - 300f, steps = 24)
                 pause(500)
                 slowMenu("View", "Fold All")
-                pause(1100)
+                pause(1200)
                 slowMenu("View", "Unfold All")
-                pause(700)
-                slowMenu("Settings", "Dark mode")
-                pause(700)
-                tapDescribed("Close menu")
-                pause(1000)
-                slowMenu("Settings", "Theme", "Monokai")
                 pause(600)
+                slowMenu("Settings", "Dark mode")
+                pause(500)
                 tapDescribed("Close menu")
-                pause(1000)
+                pause(1100)
                 slowMenu("View", "Function List")
-                pause(900)
+                pause(1000)
                 device.wait(Until.findObject(By.textStartsWith("report")), 5000)?.shownClick()
                 pause(900)
                 device.findObject(By.desc("Close panel"))?.shownClick()
-                pause(500)
+                pause(400)
             }
 
-            // 3. Searching and changing: find, count, replace all, and typing on several lines at once.
+            // 3. Searching and changing: find, count, replace all.
             fresh()
             open("inventory.py", python)
             hideKeyboard()
             record("search") {
-                pause(500)
+                pause(400)
                 tap("Find")
                 pause(500)
                 device.wait(Until.findObject(By.clazz("android.widget.EditText")), 4000)!!.text = "item"
@@ -3179,28 +3172,40 @@ class WalkthroughTest {
                 fields[1].text = "quantity"
                 pause(700)
                 tapDescribed("Replace all")
-                pause(1400)
-                tapDescribed("Close")
-                pause(600)
-                // With Alt held, a drag down the lines puts a caret on each of them.
+                pause(1500)
+            }
+
+            // 4. Several places at once: a column of carets with the Alt key, then every "Item" selected and retyped.
+            fresh()
+            open("inventory.py", python)
+            hideKeyboard()
+            record("columns") {
+                pause(400)
                 tap("Alt")
                 pause(500)
                 val (fromX, fromY) = pointOf(sci(Sci.SCI_FINDCOLUMN, 9, 4))
                 val (_, toY) = pointOf(sci(Sci.SCI_FINDCOLUMN, 11, 4))
                 drag(fromX, fromY, fromX, toY, steps = 18, stepDelay = 30)
                 pause(700)
-                type("# ", 180)
+                type("# ", 200)
+                pause(1200)
+                // A word under the caret, then all its occurrences.
+                sci(Sci.SCI_GOTOPOS, sci(Sci.SCI_FINDCOLUMN, 8, 8))
+                pause(500)
+                slowMenu("Edit", "Multi-select All", "Match Case & Whole Word")
                 pause(900)
+                type("Product", 150)
+                pause(1000)
             }
 
-            // 4. The plugins: Compare, the Hex Editor and Lua scripting.
+            // 5. Two of the plugins: Compare and the Hex Editor.
             fresh()
             setText("milk\nbread\neggs\nbutter\napples\n")
             tap("New")
             setText("milk\nbread\n12 eggs\nbutter\ncheese\napples\ntea\n")
             hideKeyboard()
             record("plugins") {
-                pause(500)
+                pause(400)
                 slowMenu("Plugins", "Compare", "Compare")
                 waitUntil("the comparison") { onUi { it.comparisonDifferences } == 3 }
                 pause(1500)
@@ -3209,24 +3214,39 @@ class WalkthroughTest {
                 tapDescribed("Next difference")
                 pause(900)
                 tapDescribed("Clear compare")
-                pause(700)
+                pause(600)
                 slowMenu("Plugins", "Hex Editor", "View in HEX")
                 pause(300)
                 tapDescribed("Close menu")
-                pause(1500)
+                pause(1700)
                 tapDescribed("Leave HEX view")
-                pause(600)
+                pause(500)
+            }
+
+            // 6. Lua: a line in the console, then a script that adds a command to the menu.
+            fresh()
+            setText("Meeting notes\n")
+            sci(Sci.SCI_DOCUMENTEND)
+            hideKeyboard()
+            record("lua") {
+                pause(400)
                 slowMenu("Plugins", "Lua Script", "Show Console")
                 pause(300)
                 tapDescribed("Close menu")
+                pause(500)
+                luaInput("editor:AppendText('written by a script')")
+                pause(1000)
+                luaInput("editor.Length")
+                pause(1000)
+                slowMenu("Plugins", "Lua Script", "Examples", "Insert Date")
+                pause(1500)
+                slowMenu("Plugins", "Lua Script", "Execute Current File")
+                pause(500)
+                tap("new 1")
                 pause(600)
-                device.wait(Until.findObject(By.desc("Lua input")), 4000)!!.text = "editor.LineCount"
-                pause(500)
-                tapDescribed("Run Lua")
-                pause(900)
-                device.wait(Until.findObject(By.desc("Lua input")), 4000)!!.text = "editor:AppendText(os.date('%A'))"
-                pause(500)
-                tapDescribed("Run Lua")
+                sci(Sci.SCI_DOCUMENTEND)
+                onUi { it.editor.typeText("\n") }
+                slowMenu("Plugins", "Lua Script", "Insert Date")
                 pause(1300)
             }
         } finally {
