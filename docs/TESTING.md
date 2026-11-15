@@ -79,6 +79,18 @@ The emulator cannot judge these, so they are worth trying by hand on real device
 4. **Open with**: picking Pocketpad++ for a text file from a file manager.
 5. **Rotation** and, if available, a Bluetooth or USB keyboard (arrows, Ctrl+Z/X/C/V/A).
 
+## Recordings for the README
+
+The clips at the top of the README are recorded the same way the walkthrough runs: a test
+(`readmeRecordings`) plays six short scenes on the emulator while Android's `screenrecord` captures the
+screen, and a mark is drawn where each tap lands. The test is skipped in the normal run; `tools/record_demos.sh`
+runs it alone, and the **Recordings** workflow does that on GitHub when started by hand or by a push to the
+`recordings` branch, publishing the clips as the `recordings-latest` download. `tools/make_gifs.sh` turns
+the clips into the GIFs under `docs/recordings/`, which are committed after someone has looked at them.
+
+The mark needs a window above the app's own, for which only the debug build (the one tests run against) asks
+Android's permission. The published APK asks for none.
+
 ## Known gaps
 
 Editor:
