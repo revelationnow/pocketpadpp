@@ -116,6 +116,17 @@ jobs:
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: pocketpadpp-dev.apk
+      # The same check a person would make, so that a build whose attestation does not verify never goes out.
+      - name: Check the attestation
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            gh attestation verify pocketpadpp-dev.apk --repo "$GITHUB_REPOSITORY" --source-digest "$GITHUB_SHA" && exit 0
+            sleep 10
+          done
+          exit 1
       # A rolling pre-release gives the phone a direct download link for the newest build.
       - name: Publish rolling pre-release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')

@@ -2980,7 +2980,7 @@ class WalkthroughTest {
         val folder = "/sdcard/Download/pocketpad/recordings"
         device.executeShellCommand("mkdir -p $folder")
         fun pause(millis: Long = 800) = SystemClock.sleep(millis)
-        fun type(text: String, each: Long = 60) {
+        fun type(text: String, each: Long = 25) {
             for (ch in text) {
                 onUi { it.editor.typeText(ch.toString()) }
                 SystemClock.sleep(each)
@@ -2996,10 +2996,10 @@ class WalkthroughTest {
         }
         fun slowMenu(vararg path: String) {
             tapDescribed("Menu")
-            pause(550)
+            pause(450)
             for (step in path) {
                 menu(step)
-                pause(550)
+                pause(450)
             }
         }
         // Every clip starts from a freshly installed app.
@@ -3187,14 +3187,14 @@ class WalkthroughTest {
                 val (_, toY) = pointOf(sci(Sci.SCI_FINDCOLUMN, 11, 4))
                 drag(fromX, fromY, fromX, toY, steps = 18, stepDelay = 30)
                 pause(700)
-                type("# ", 200)
+                type("# ", 150)
                 pause(1200)
                 // A word under the caret, then all its occurrences.
                 sci(Sci.SCI_GOTOPOS, sci(Sci.SCI_FINDCOLUMN, 8, 8))
                 pause(500)
                 slowMenu("Edit", "Multi-select All", "Match Case & Whole Word")
                 pause(900)
-                type("Product", 150)
+                type("Product", 110)
                 pause(1000)
             }
 
@@ -3242,7 +3242,8 @@ class WalkthroughTest {
                 pause(1500)
                 slowMenu("Plugins", "Lua Script", "Execute Current File")
                 pause(500)
-                tap("new 1")
+                // Back to the notes; their tab says "● new 1" now that they have changed.
+                device.wait(Until.findObject(By.textEndsWith("new 1")), 4000)!!.shownClick()
                 pause(600)
                 sci(Sci.SCI_DOCUMENTEND)
                 onUi { it.editor.typeText("\n") }
