@@ -3223,32 +3223,25 @@ class WalkthroughTest {
                 pause(500)
             }
 
-            // 6. Lua: a line in the console, then a script that adds a command to the menu.
+            // 6. Lua: a script that adds a command to the menu, then a line typed into the console.
             fresh()
             setText("Meeting notes\n")
             sci(Sci.SCI_DOCUMENTEND)
             hideKeyboard()
             record("lua") {
                 pause(400)
-                slowMenu("Plugins", "Lua Script", "Show Console")
-                pause(300)
-                tapDescribed("Close menu")
-                pause(500)
-                luaInput("editor:AppendText('written by a script')")
-                pause(1000)
-                luaInput("editor.Length")
-                pause(1000)
                 slowMenu("Plugins", "Lua Script", "Examples", "Insert Date")
                 pause(1500)
+                // Running the script also opens the console.
                 slowMenu("Plugins", "Lua Script", "Execute Current File")
-                pause(500)
-                // Back to the notes; their tab says "● new 1" now that they have changed.
-                device.wait(Until.findObject(By.textEndsWith("new 1")), 4000)!!.shownClick()
                 pause(600)
+                device.wait(Until.findObject(By.textEndsWith("new 1")), 4000)!!.shownClick()
+                pause(500)
                 sci(Sci.SCI_DOCUMENTEND)
-                onUi { it.editor.typeText("\n") }
                 slowMenu("Plugins", "Lua Script", "Insert Date")
-                pause(1300)
+                pause(1200)
+                luaInput("editor:AppendText('\\nwritten by a script')")
+                pause(1400)
             }
         } finally {
             tapMark?.let { mark ->
