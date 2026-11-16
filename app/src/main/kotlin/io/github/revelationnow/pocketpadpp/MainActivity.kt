@@ -409,9 +409,24 @@ open class MainActivity : Activity() {
     private fun handleIntent(intent: Intent?) {
         val uri = intent?.data ?: return
         if (intent.action == Intent.ACTION_VIEW || intent.action == Intent.ACTION_EDIT) {
-            openUris(listOf(uri))
+            if (acceptsFromOutside(uri)) openUris(listOf(uri))
             intent.data = null
         }
+    }
+
+    /**
+     * Whether a file that another app, or a link in a browser, asks to have opened is one the editor opens.
+     * The app's own files (settings, session, scripts) are not: nothing outside has a reason to point at them.
+     */
+    internal fun acceptsFromOutside(uri: Uri): Boolean {
+        if (uri.scheme != "file") return true
+        val path = runCatching { java.io.File(uri.path ?: return false).canonicalPath }.getOrNull() ?: return false
+        // The same folder goes by more than one path.
+        val own = listOfNotNull(
+            applicationInfo.dataDir, runCatching { java.io.File(applicationInfo.dataDir).canonicalPath }.getOrNull(),
+            "/data/data/$packageName", "/data/user/0/$packageName",
+        )
+        return own.none { path == it || path.startsWith("$it/") }
     }
 
     override fun onStop() {

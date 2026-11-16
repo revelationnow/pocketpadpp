@@ -33,6 +33,7 @@ import io.github.revelationnow.pocketpadpp.editor.ScintillaView
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -2678,6 +2679,16 @@ class WalkthroughTest {
         } finally {
             file.delete()
         }
+    }
+
+    @Test
+    fun filesFromOtherApps() {
+        // Another app may hand over its files, but may not point the editor at the app's own.
+        assertTrue(onUi { it.acceptsFromOutside(Uri.parse("content://com.example.files/document/7")) })
+        assertTrue(onUi { it.acceptsFromOutside(Uri.parse("file:///sdcard/Download/notes.txt")) })
+        assertFalse("the startup script", onUi { it.acceptsFromOutside(Uri.fromFile(it.startupScript())) })
+        assertFalse("the settings", onUi { it.acceptsFromOutside(Uri.parse("file:///data/data/${context.packageName}/shared_prefs/settings.xml")) })
+        assertFalse("by a roundabout path", onUi { it.acceptsFromOutside(Uri.parse("file://${context.filesDir.path}/../files/session.xml")) })
     }
 
     @Test

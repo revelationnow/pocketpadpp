@@ -15,6 +15,9 @@ local unpack, pack = table.unpack, table.pack
 
 -- A script can end the app's process with this; nothing good comes of it.
 os.exit = nil
+-- Starting other programs is how a script could pass text to another app, a browser for one, unasked.
+os.execute = nil
+io.popen = nil
 
 local scripts = call("scripts")
 if scripts and scripts ~= "" then

@@ -1340,6 +1340,7 @@ private fun testLua(assets: File) {
     eq("1\t2\tnil", value("1, 2, nil"), "several values are separated by tabs")
     ok(value("1 +").contains("console:1:"), "a line that is not Lua says so")
     eq("nil", value("os.exit"), "a script cannot end the app")
+    eq("nil nil", value("tostring(os.execute) .. ' ' .. tostring(io.popen)"), "or start other programs")
     eq("/scripts/?.lua;/scripts/?/init.lua", value("package.path"), "require looks in the scripts folder")
 
     // Functions: text in, text out.

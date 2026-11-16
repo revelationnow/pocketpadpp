@@ -114,7 +114,12 @@ to mark text with; the app uses the ones above.
 
 - A script that runs for more than five seconds in one go is stopped with an error, and so is one that takes
   more than about 190 MB of memory. While a script runs, the app waits for it.
-- `os.exit` is removed. `io` and `os` reach what Android lets the app reach: its own storage.
+- `os.exit`, `os.execute` and `io.popen` are removed: a script cannot end the app or start other programs.
+  `io` and `os` reach what Android lets the app reach: its own storage.
+- A script is trusted code. It can read and change every open document and the app's own files, the same
+  as the app itself, so run only scripts you have read or trust. The app has no internet permission, and with
+  no way to start programs a script has no direct way to send anything out; it can still open menu commands
+  such as Search on Internet, which you would see happen.
 - Compiled Lua (bytecode) is not run as a script.
 - Functions that hand out raw memory (`GetCharacterPointer`, `GetDocPointer`, `CreateDocument` and the like)
   are not available.
