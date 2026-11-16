@@ -1516,6 +1516,7 @@ class WalkthroughTest {
         shot("debug-info")
         tapButton("Copy to Clipboard")
         assertTrue(clipboard().contains("Scintilla 5.6.9"))
+        assertTrue("the font and whether it is fixed-width", Regex("Font: DejaVu Sans Mono, size \\d+, fixed-width").containsMatchIn(clipboard()))
         openMenu("?", "About Pocketpad++...")
         assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("Pocketpad\\+\\+ 0\\.1\\..*"))), 3000) == true)
         shot("about")

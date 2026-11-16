@@ -2563,6 +2563,9 @@ open class MainActivity : Activity() {
             "Keyboard: $keyboard",
             "Keyboard suggestions: ${if (editor.keyboardMode == ScintillaView.KeyboardMode.TEXT) "on" else "off"}",
             "Theme: ${themeName.ifEmpty { "default" }}",
+            "Font: ${fontName.removePrefix(Fonts.FILE_PREFIX)}, size $fontSize, " +
+                (if (Fonts.isFixedWidth(Fonts.typeface(fontName, 400, false))) "fixed-width" else "not fixed-width"),
+            "Language: ${workspace.active.language.name}",
             "Open documents: ${workspace.docs.size}",
         ).joinToString("\n")
         AlertDialog.Builder(themed)
