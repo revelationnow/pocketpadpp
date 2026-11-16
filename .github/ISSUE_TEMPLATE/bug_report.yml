@@ -1,0 +1,69 @@
+name: Report a problem
+description: Something does not work, looks wrong, or behaves differently from Notepad++
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time. One problem per report, please; short answers are fine.
+        Screenshots are public here, so leave out anything private.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected to see instead.
+      placeholder: "Example: the columns of a table do not line up. I expected every character to be the same width."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The steps from opening the app, as far as you remember them. Say so if it only happens sometimes.
+      placeholder: |
+        1. Open the app and type ...
+        2. Menu > ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: debug
+    attributes:
+      label: Debug info
+      description: >
+        In the app, open the menu (the three dots at the top right), then **? > Debug Info...**, tap
+        **Copy to Clipboard** and paste here. It lists the app version, Android version, phone model and
+        keyboard, and nothing from your documents. If the app does not start, write the phone model and
+        Android version instead.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where did you get the app?
+      options:
+        - The APK from this repository's releases page
+        - I built it myself
+        - Somewhere else
+    validations:
+      required: true
+  - type: textarea
+    id: pictures
+    attributes:
+      label: Screenshot or screen recording
+      description: Drag a picture or a short recording into this box. For anything about how text looks, a screenshot helps most.
+  - type: textarea
+    id: text
+    attributes:
+      label: The text or file it happens with
+      description: >
+        If it depends on what is in the document, paste a few lines that show the problem, and say which
+        language is chosen in the Language menu. For problems with typing, name the keyboard app and the
+        language you type in.
+      render: text
+  - type: textarea
+    id: other
+    attributes:
+      label: Anything else
+      description: For example whether it worked in an earlier build, or what the same steps do in Notepad++ on Windows.
