@@ -1,5 +1,6 @@
 package io.github.revelationnow.pocketpadpp.app
 
+import io.github.revelationnow.pocketpadpp.editor.Fonts
 import android.content.Context
 import android.graphics.Typeface
 import android.text.InputType
@@ -66,7 +67,7 @@ class LuaConsole(context: Context, private val palette: Palette) : LinearLayout(
 
         output.apply {
             contentDescription = "Lua output"
-            typeface = Typeface.MONOSPACE
+            typeface = Fonts.mono(context)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setTextColor(palette.chromeText)
             setTextIsSelectable(true)
@@ -86,7 +87,7 @@ class LuaConsole(context: Context, private val palette: Palette) : LinearLayout(
         input.apply {
             contentDescription = "Lua input"
             hint = "Lua, such as editor.Length"
-            typeface = Typeface.MONOSPACE
+            typeface = Fonts.mono(context)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setTextColor(palette.chromeText)
             setHintTextColor(palette.chromeDimText)

@@ -87,6 +87,7 @@ import io.github.revelationnow.pocketpadpp.core.UserLanguages
 import io.github.revelationnow.pocketpadpp.core.TextTransforms
 import io.github.revelationnow.pocketpadpp.core.ThemeApplier
 import io.github.revelationnow.pocketpadpp.core.ViewMetrics
+import io.github.revelationnow.pocketpadpp.editor.Fonts
 import io.github.revelationnow.pocketpadpp.editor.ScintillaView
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import java.util.concurrent.Executors
@@ -148,7 +149,7 @@ open class MainActivity : Activity() {
     // The theme as its file has it, and what the Style Configurator changed about it.
     private lateinit var baseTheme: NppTheme
     private var styleOverrides = StyleOverrides()
-    private var fontName = "monospace"
+    private var fontName = Fonts.BUILT_IN
     internal var options = EditorOptions()
     internal val shortcutTable = ShortcutTable(DEFAULT_SHORTCUTS)
     private var fontSize = 13
@@ -179,7 +180,7 @@ open class MainActivity : Activity() {
         setTheme(if (palette.dark) R.style.AppTheme_Dark else R.style.AppTheme)
         super.onCreate(savedInstanceState)
         fontSize = prefs.getInt("fontSize", 13)
-        fontName = prefs.getString("fontName", "monospace") ?: "monospace"
+        fontName = prefs.getString("fontName", Fonts.BUILT_IN) ?: Fonts.BUILT_IN
         options = EditorOptions(
             tabSize = prefs.getInt("tabSize", 4),
             useSpaces = prefs.getBoolean("useSpaces", false),
@@ -370,7 +371,7 @@ open class MainActivity : Activity() {
         root.addView(luaConsole, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.3f).toInt()))
 
         imeLogView = TextView(themed).apply {
-            typeface = Typeface.MONOSPACE
+            typeface = Fonts.mono(context)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
             setTextColor(0xFF004400.toInt())
             setBackgroundColor(0xFFF4FFF4.toInt())
@@ -473,7 +474,7 @@ open class MainActivity : Activity() {
             val button = Button(themed, null, android.R.attr.borderlessButtonStyle).apply {
                 text = label
                 isAllCaps = false
-                typeface = Typeface.MONOSPACE
+                typeface = Fonts.mono(context)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 minWidth = 0
                 minimumWidth = dp(40f)
@@ -555,7 +556,7 @@ open class MainActivity : Activity() {
             val armed = armedModifiers and bit != 0
             button.setBackgroundColor(if (locked) palette.accent else Color.TRANSPARENT)
             button.setTextColor(if (locked) Color.WHITE else if (armed) palette.accent else palette.chromeText)
-            button.setTypeface(Typeface.MONOSPACE, if (armed || locked) Typeface.BOLD else Typeface.NORMAL)
+            button.typeface = Fonts.mono(this, bold = armed || locked)
             button.contentDescription = button.text.toString() + (if (locked) ", locked" else if (armed) ", on for the next key" else "")
         }
     }
@@ -1059,6 +1060,25 @@ open class MainActivity : Activity() {
                                 else -> "Imported ${imported.size} themes. They are now listed under Theme."
                             },
                         )
+                    }
+                }
+            }
+
+            REQUEST_ADD_FONT -> data.data?.let { uri ->
+                io.execute {
+                    val name = FileIo.displayName(this, uri)
+                    val stream = runCatching { contentResolver.openInputStream(uri) }.getOrNull()
+                    ui.post {
+                        if (destroyed) {
+                            stream?.close()
+                            return@post
+                        }
+                        val added = stream?.use { importFont(name, it) }
+                        when {
+                            added == null -> toast("That file cannot be used as a font")
+                            Fonts.isFixedWidth(Fonts.typeface(fontName, 400, false)) -> toast("Now using $added")
+                            else -> toast("Now using $added. Its letters differ in width, so columns will not line up.")
+                        }
                     }
                 }
             }
@@ -1967,10 +1987,18 @@ open class MainActivity : Activity() {
     private fun showStyleConfigurator() = showMenu("Style Configurator") {
         sub("Font") {
             for ((label, family) in FONTS) {
-                item(label, checked = fontName == family) {
-                    fontName = family
-                    prefs.edit().putString("fontName", family).apply()
-                    workspace.restyle()
+                item(label, checked = fontName == family) { setFont(family) }
+            }
+            val added = addedFonts()
+            for (file in added) {
+                item(file.substringBeforeLast('.'), checked = fontName == Fonts.FILE_PREFIX + file) { setFont(Fonts.FILE_PREFIX + file) }
+            }
+            item("Add Font File...", checked = false) { pickFont() }
+            if (added.isNotEmpty()) {
+                item("Remove Added Fonts", checked = false) {
+                    Fonts.folder(this@MainActivity).listFiles()?.forEach { it.delete() }
+                    Fonts.forget()
+                    setFont(if (fontName.startsWith(Fonts.FILE_PREFIX)) Fonts.BUILT_IN else fontName)
                 }
             }
         }
@@ -2018,7 +2046,7 @@ open class MainActivity : Activity() {
         val preview = TextView(themed).apply {
             contentDescription = "Style preview"
             text = "AaBbCc 0123 { }"
-            typeface = Typeface.MONOSPACE
+            typeface = Fonts.mono(context)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
             gravity = Gravity.CENTER
             setPadding(dp(8f), dp(12f), dp(8f), dp(12f))
@@ -2037,7 +2065,7 @@ open class MainActivity : Activity() {
         fun refresh() {
             preview.setTextColor((parse(fore.text.toString()) ?: base.fg ?: default?.fg ?: 0) or 0xFF000000.toInt())
             preview.setBackgroundColor((parse(back.text.toString()) ?: base.bg ?: default?.bg ?: 0xFFFFFF) or 0xFF000000.toInt())
-            preview.setTypeface(Typeface.MONOSPACE, (if (bold.isChecked) Typeface.BOLD else 0) or (if (italic.isChecked) Typeface.ITALIC else 0))
+            preview.typeface = Fonts.typeface(fontName, if (bold.isChecked) 700 else 400, italic.isChecked)
             preview.paintFlags = if (underline.isChecked) preview.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
             else preview.paintFlags and android.graphics.Paint.UNDERLINE_TEXT_FLAG.inv()
         }
@@ -2108,6 +2136,63 @@ open class MainActivity : Activity() {
     }
 
     // endregion
+
+    private fun setFont(name: String) {
+        fontName = name
+        prefs.edit().putString("fontName", name).apply()
+        workspace.restyle()
+    }
+
+    private fun addedFonts(): List<String> =
+        (Fonts.folder(this).list() ?: emptyArray()).filter { !it.endsWith(".tmp") }.sortedBy { it.lowercase() }
+
+    private fun pickFont() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQUEST_ADD_FONT)
+        } catch (e: Exception) {
+            toast("No file picker is available")
+        }
+    }
+
+    /**
+     * Style Configurator > Font > Add Font File: keeps a TrueType or OpenType font with the app and makes it the
+     * editor's font. Returns the name it is listed under, or null if Android cannot use the file as a font.
+     */
+    internal fun importFont(fileName: String, content: java.io.InputStream): String? {
+        val base = fileName.substringAfterLast('/').substringBeforeLast('.').replace(Regex("[^A-Za-z0-9 ._()+-]"), "_").trim('.', ' ').ifEmpty { "Font" }
+        val extension = fileName.substringAfterLast('.', "ttf").lowercase().takeIf { it in setOf("ttf", "otf", "ttc", "otc") } ?: "ttf"
+        val folder = Fonts.folder(this).apply { mkdirs() }
+        val incoming = java.io.File(folder, "incoming.tmp")
+        val kept = java.io.File(folder, "$base.$extension")
+        try {
+            var total = 0L
+            incoming.outputStream().use { out ->
+                val buffer = ByteArray(1 shl 16)
+                while (true) {
+                    val n = content.read(buffer)
+                    if (n < 0) break
+                    total += n
+                    if (total > Fonts.MAX_FILE_BYTES) return null
+                    out.write(buffer, 0, n)
+                }
+            }
+            if (Fonts.load(incoming) == null) return null
+            kept.delete()
+            if (!incoming.renameTo(kept)) return null
+        } catch (e: java.io.IOException) {
+            return null
+        } finally {
+            incoming.delete()
+        }
+        Fonts.forget()
+        setFont(Fonts.FILE_PREFIX + kept.name)
+        return base
+    }
 
     private fun importedThemes() = java.io.File(filesDir, "themes")
 
@@ -2498,7 +2583,7 @@ open class MainActivity : Activity() {
         val eachLine = android.widget.CheckBox(themed).apply { text = "Treat each line as a separate string" }
         val result = TextView(themed).apply {
             contentDescription = "Digest"
-            typeface = Typeface.MONOSPACE
+            typeface = Fonts.mono(context)
             setTextIsSelectable(true)
             setPadding(0, dp(8f), 0, 0)
         }
@@ -3215,7 +3300,7 @@ open class MainActivity : Activity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setTextColor(palette.chromeText)
             setBackgroundColor(palette.chrome)
-            typeface = Typeface.MONOSPACE
+            typeface = Fonts.mono(context)
             maxLines = 4
             setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
             visibility = View.GONE
@@ -3260,7 +3345,7 @@ open class MainActivity : Activity() {
                 text = word
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 setTextColor(palette.chromeText)
-                typeface = Typeface.MONOSPACE
+                typeface = Fonts.mono(context)
                 gravity = Gravity.CENTER
                 setPadding(dp(12f), 0, dp(12f), 0)
                 setOnClickListener {
@@ -4988,6 +5073,7 @@ open class MainActivity : Activity() {
         const val REQUEST_SAVE_WORKSPACE = 11
         const val REQUEST_IMPORT_UDL = 12
         const val REQUEST_EXPORT_UDL = 13
+        const val REQUEST_ADD_FONT = 14
         const val PROJECT_PANELS = 3
         const val PANEL_DOCUMENTS = "Documents"
         const val MAP_WIDTH_DP = 72f
@@ -5054,8 +5140,10 @@ open class MainActivity : Activity() {
         const val COMMAND_SEPARATOR = " > "
 
         /** Font families every Android device has. */
+        /** The first is the font that comes with the app; the others are whatever the phone has under these names. */
         val FONTS = listOf(
-            "Monospace" to "monospace", "Serif Monospace" to "serif-monospace", "Sans Serif" to "sans-serif", "Serif" to "serif",
+            "DejaVu Sans Mono (built in)" to Fonts.BUILT_IN, "System Monospace" to "monospace",
+            "System Serif Monospace" to "serif-monospace", "System Sans Serif" to "sans-serif", "System Serif" to "serif",
         )
 
         val SWATCHES = listOf(

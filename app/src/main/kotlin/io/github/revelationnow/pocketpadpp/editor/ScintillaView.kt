@@ -1202,6 +1202,7 @@ class ScintillaView @JvmOverloads constructor(
 
         private fun ensurePlatform(context: Context) {
             if (platformReady) return
+            Fonts.init(context)
             val metrics = context.resources.displayMetrics
             // Style sizes are treated as sp, so they follow the system font size setting.
             val pixelsPerPoint = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 1f, metrics)

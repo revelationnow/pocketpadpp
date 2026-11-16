@@ -13,6 +13,7 @@ import android.widget.BaseAdapter
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import io.github.revelationnow.pocketpadpp.editor.Fonts
 import io.github.revelationnow.pocketpadpp.core.Hit
 import kotlin.math.roundToInt
 
@@ -62,7 +63,7 @@ class ResultsPanel(context: Context, private val palette: Palette) : LinearLayou
                 view.setBackgroundColor(palette.keysBack)
                 view.text = "${row.group.name} (${row.group.hits.size} ${if (row.group.hits.size == 1) "hit" else "hits"})"
             } else {
-                view.typeface = Typeface.MONOSPACE
+                view.typeface = Fonts.mono(context)
                 view.setTextColor(palette.chromeText)
                 view.setBackgroundColor(if (position == selected) palette.tabInactiveBack else 0)
                 val prefix = "Line ${hit.line + 1}: "

@@ -9,8 +9,6 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
-import android.graphics.Typeface
-import android.os.Build
 import io.github.revelationnow.pocketpadpp.scintilla.SciFont
 import io.github.revelationnow.pocketpadpp.scintilla.SciPlatform
 import io.github.revelationnow.pocketpadpp.scintilla.SciSurface
@@ -21,14 +19,7 @@ internal class AndroidFont(face: String, sizePx: Float, weight: Int, italic: Boo
     private val metrics: Paint.FontMetrics
 
     init {
-        // Unknown family names fall back to the system default typeface.
-        val family = Typeface.create(face.ifEmpty { "monospace" }, Typeface.NORMAL)
-        paint.typeface = if (Build.VERSION.SDK_INT >= 28) {
-            Typeface.create(family, weight.coerceIn(1, 1000), italic)
-        } else {
-            val style = (if (weight >= 600) Typeface.BOLD else 0) or (if (italic) Typeface.ITALIC else 0)
-            Typeface.create(family, style)
-        }
+        paint.typeface = Fonts.typeface(face, weight, italic)
         paint.textSize = sizePx
         metrics = paint.fontMetrics
     }

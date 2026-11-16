@@ -28,3 +28,10 @@ definitions (extensions, keywords, comment markers) and default colour theme, co
 from the same commit and licensed under the GPL version 3 like the rest of Notepad++.
 `languages.tsv` beside them is generated from Notepad++'s source code by
 `tools/gen_npp_tables.py`, which also refreshes the two XML files.
+
+## Font
+
+`app/src/main/assets/fonts/` holds the four faces of DejaVu Sans Mono, copied unmodified from
+`dejavu-fonts-ttf-2.37.tar.bz2` (https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37),
+with its licence beside them (`DejaVu-LICENSE.txt`: the Bitstream Vera licence, with the DejaVu changes in
+the public domain). It is the editor's default font, so that text is fixed-width on every phone.

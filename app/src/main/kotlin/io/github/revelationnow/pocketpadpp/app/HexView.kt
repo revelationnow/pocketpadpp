@@ -3,7 +3,6 @@ package io.github.revelationnow.pocketpadpp.app
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Typeface
 import android.text.InputType
 import android.view.GestureDetector
 import android.view.KeyEvent
@@ -14,6 +13,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
+import io.github.revelationnow.pocketpadpp.editor.Fonts
 import io.github.revelationnow.pocketpadpp.core.HexBuffer
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import kotlin.math.max
@@ -61,8 +61,8 @@ class HexView(context: Context) : View(context) {
     var onShortcut: ((Int, Int) -> Boolean)? = null
 
     private val density = resources.displayMetrics.density
-    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE }
-    private val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE }
+    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Fonts.mono(context) }
+    private val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Fonts.mono(context) }
     private val mark = Paint()
     private val soft = Paint()
     private var background = 0xFFFFFFFF.toInt()

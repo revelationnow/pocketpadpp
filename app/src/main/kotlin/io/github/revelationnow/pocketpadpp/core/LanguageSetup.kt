@@ -176,7 +176,7 @@ object LanguageSetup {
 
 /** Sizes that depend on the device, passed in so the theme code stays free of Android classes. */
 class ViewMetrics(
-    val fontName: String = "monospace",
+    val fontName: String = "DejaVu Sans Mono",
     val fontSize: Int = 13,
     val foldMarginWidth: Int = 24,
     val leftPadding: Int = 4,

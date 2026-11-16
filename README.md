@@ -206,7 +206,9 @@ Things that work differently on a touch screen than you might expect:
 - Preferences for tab size, spaces instead of tabs, auto-indent, caret, vertical edge, and the line ending
   and encoding of new documents
 - Shortcut Mapper: any menu command can be given a shortcut, and the menus show them
-- Style Configurator: the font, and the colours and font style of any style in the theme
+- Style Configurator: the font, and the colours and font style of any style in the theme. A fixed-width font
+  (DejaVu Sans Mono) comes with the app, so columns line up on every phone; the phone's own fonts and any
+  TrueType or OpenType font file you add can be used instead
 - Import Notepad++ theme files, and choose extra commands for the selection toolbar
 
 **Tools and windows**
@@ -313,6 +315,7 @@ Internet hand an address to your browser. Lua scripts run inside the same limits
 | `app/src/main/kotlin/.../editor/` | `ScintillaView`: drawing, touch scrolling, selection handles, gestures, input connection |
 | `app/src/main/kotlin/.../core/` | Application logic without Android classes: encodings, Notepad++ language and theme import, search, edit commands, sessions, the function list, diff, the hex buffer, the Lua engine |
 | `app/src/main/kotlin/.../app/`, `MainActivity.kt` | Tabs, file access, find bar, menus, panels, shortcuts |
+| `app/src/main/assets/fonts/` | DejaVu Sans Mono 2.37, unmodified, the editor's default font |
 | `app/src/main/assets/npp/` | Notepad++'s language definitions, themes, function list rules and auto-completion files |
 | `app/src/main/assets/lua/` | The scripting layer (itself written in Lua), tables generated from Scintilla's interface, and the examples |
 | `hosttest/` | Tests that run the native layer and the application logic on a desktop JVM, with Java2D standing in for the Android canvas |
@@ -353,6 +356,7 @@ Scripts are welcome too: a Lua script that others would find useful can join the
   Its function list rules, auto-completion files and function list test files are used the same way.
 - [Scintilla and Lexilla](https://www.scintilla.org/) by Neil Hodgson and contributors, the editing engine and lexers.
 - [Lua](https://www.lua.org/) by Roberto Ierusalimschy, Luiz Henrique de Figueiredo and Waldemar Celes (MIT licence).
+- [DejaVu fonts](https://dejavu-fonts.github.io/), whose DejaVu Sans Mono is the font that comes with the app.
 - [LuaScript](https://github.com/dail8859/LuaScript) by Justin Dailey, the Notepad++ plugin whose scripting
   interface the Lua layer follows, and SciTE's Lua extension before it.
 - [ComparePlus](https://github.com/pnedev/comparePlus) and the HEX-Editor plugin, whose behaviour the built-in

@@ -28,6 +28,7 @@ import io.github.revelationnow.pocketpadpp.core.Eol
 import io.github.revelationnow.pocketpadpp.core.KeyBinding
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.SearchOptions
+import io.github.revelationnow.pocketpadpp.editor.Fonts
 import io.github.revelationnow.pocketpadpp.editor.ScintillaView
 import io.github.revelationnow.pocketpadpp.scintilla.Sci
 import org.junit.After
@@ -1932,9 +1933,9 @@ class WalkthroughTest {
         assertEquals("reset brings the theme's colour back", original, sci(Sci.SCI_STYLEGETFORE, keyword))
         tapDescribed("Back")
         menu("Font")
-        menu("Serif")
+        menu("System Serif")
         shot("font-serif")
-        menu("Monospace")
+        menu("DejaVu Sans Mono (built in)")
         tapDescribed("Close menu")
 
         // A Notepad++ theme file can be imported and then picked like the built-in ones.
@@ -2676,6 +2677,62 @@ class WalkthroughTest {
             assertNull(onUi { it.otherView })
         } finally {
             file.delete()
+        }
+    }
+
+    @Test
+    fun fixedWidthFont() {
+        // Ten of each: a narrow letter, a wide one, digits, Cyrillic, Greek, box-drawing characters and spaces.
+        val rows = listOf("iiiiiiiiii", "WWWWWWWWWW", "0123456789", "ЖЖЖЖЖЖЖЖЖЖ", "ΩΩΩΩΩΩΩΩΩΩ", "├────────┤", "          ")
+        fun widths(): List<Long> = rows.indices.map { line ->
+            sci(Sci.SCI_POINTXFROMPOSITION, 0, sci(Sci.SCI_GETLINEENDPOSITION, line.toLong())) -
+                sci(Sci.SCI_POINTXFROMPOSITION, 0, sci(Sci.SCI_POSITIONFROMLINE, line.toLong()))
+        }
+        fun chooseFont(label: String) {
+            openMenu("Settings", "Style Configurator...")
+            menu("Font")
+            menu(label)
+            tapDescribed("Close menu")
+        }
+        val added = Fonts.folder(context)
+        try {
+            setText(rows.joinToString("\n") + "\n")
+            val regular = widths()
+            assertTrue("the rows have a width", regular[0] > 0)
+            assertEquals("ten characters are as wide as any other ten: $regular", 1, regular.toSet().size)
+            assertTrue("the font that comes with the app is fixed-width", onUi { Fonts.isFixedWidth(Fonts.mono(it)) })
+            shot("font-fixed-width")
+
+            // Bold and italic are faces of the same font and keep the columns.
+            sci(Sci.SCI_STYLESETBOLD, 0, 1)
+            assertEquals("bold", regular, widths())
+            sci(Sci.SCI_STYLESETITALIC, 0, 1)
+            assertEquals("bold italic", regular, widths())
+            shot("font-fixed-width-bold-italic")
+
+            // The phone's own fonts stay available.
+            chooseFont("System Serif")
+            assertTrue("a proportional font is not fixed-width", widths().let { it[0] < it[1] })
+            chooseFont("System Monospace")
+            assertTrue("the system's monospace", widths().let { it[0] == it[1] })
+
+            // A font file can be added; it becomes the font in use and is listed by its name.
+            val file = context.assets.open("fonts/DejaVuSansMono-Bold.ttf")
+            assertEquals("My Font", onUi { activity -> file.use { activity.importFont("My Font.ttf", it) } })
+            assertEquals("the added font is used", regular, widths())
+            assertNull("other files are turned down", onUi { it.importFont("notes.ttf", "not a font".byteInputStream()) })
+            assertEquals("and leave the font as it was", listOf("My Font.ttf"), added.list()!!.toList())
+            shot("font-added")
+            openMenu("Settings", "Style Configurator...")
+            menu("Font")
+            assertTrue("listed under Font", onScreen("My Font"))
+            shot("font-menu")
+            menu("Remove Added Fonts")
+            tapDescribed("Close menu")
+            assertEquals("removed", 0, added.list()!!.size)
+            assertEquals("back to the built-in font", regular, widths())
+        } finally {
+            added.listFiles()?.forEach { it.delete() }
         }
     }
 

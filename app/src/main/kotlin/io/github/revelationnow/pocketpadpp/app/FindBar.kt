@@ -14,6 +14,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ToggleButton
+import io.github.revelationnow.pocketpadpp.editor.Fonts
 import io.github.revelationnow.pocketpadpp.core.EditOps
 import io.github.revelationnow.pocketpadpp.core.Marks
 import io.github.revelationnow.pocketpadpp.core.SciApi
@@ -48,7 +49,7 @@ class FindBar(context: Context, private val editor: SciApi, private val palette:
     private fun field(hintText: String) = EditText(context).apply {
         hint = hintText
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-        typeface = Typeface.MONOSPACE
+        typeface = Fonts.mono(context)
         maxLines = 1
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
         imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI
