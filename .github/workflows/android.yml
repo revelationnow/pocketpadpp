@@ -32,6 +32,24 @@ jobs:
           path: hosttest/out/*.png
           if-no-files-found: ignore
 
+  sanitizer-tests:
+    name: Native layer tests under sanitizers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build fonts-dejavu-core
+      # The same desktop tests, with the C++ built to stop at memory errors and undefined behaviour.
+      - name: Run tests with the address and undefined-behaviour sanitizers
+        run: |
+          sudo sysctl -w vm.mmap_rnd_bits=28
+          SANITIZE=1 hosttest/run.sh
+
   ui-tests:
     name: UI tests (emulator)
     runs-on: ubuntu-latest

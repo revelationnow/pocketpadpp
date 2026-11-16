@@ -9,6 +9,13 @@ all of them run on every push (see `.github/workflows/android.yml`).
 | Core (`hosttest/kotlin/CoreTests.kt`) | Desktop JVM | Encodings, line endings, Notepad++ language and theme import, search, every edit command, sessions, shortcuts, style changes, auto-completion, and the function list against Notepad++'s own test files for 37 languages |
 | Walkthrough (`app/src/androidTest`) | Android emulator | The real app, driven like a person would: see below |
 
+## Sanitizers
+
+`SANITIZE=1 hosttest/run.sh` runs the same desktop tests with the C++ (Scintilla, Lexilla, Lua and the
+Android platform layer) built under GCC's address and undefined-behaviour sanitizers, so that a read or
+write outside an object, a use after free or an overflowing signed number stops the run with a report.
+CI does this on every push. It checks the paths the tests take, on the desktop build; it is not fuzzing.
+
 ## The emulator walkthrough
 
 `WalkthroughTest` starts the app on an emulator, taps through it, checks what the editor ends up holding

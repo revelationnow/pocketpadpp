@@ -13,6 +13,7 @@ captures/
 
 # Desktop test harness output
 hosttest/build/
+hosttest/build-sanitize/
 hosttest/out/
 
 .DS_Store

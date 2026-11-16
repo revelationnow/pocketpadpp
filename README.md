@@ -305,6 +305,9 @@ cannot send your files anywhere, and it shows no ads and collects nothing. Files
 file picker, which gives the app the files you choose and no others. Links in the ? menu, Run and Search on
 Internet hand an address to your browser. Lua scripts run inside the same limits.
 
+What has and has not been checked about the app's security, including that its code was written by an AI
+model and has had no independent audit, is set out in [SECURITY.md](SECURITY.md).
+
 ## How it is put together
 
 | Path | What |
