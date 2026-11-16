@@ -2695,9 +2695,11 @@ class WalkthroughTest {
     fun fixedWidthFont() {
         // Ten of each: a narrow letter, a wide one, digits, Cyrillic, Greek, box-drawing characters and spaces.
         val rows = listOf("iiiiiiiiii", "WWWWWWWWWW", "0123456789", "ЖЖЖЖЖЖЖЖЖЖ", "ΩΩΩΩΩΩΩΩΩΩ", "├────────┤", "          ")
+        // Measured up to the tenth character, not to the end of the line: Scintilla leaves two pixels after
+        // a line that ends in an italic letter, so that the slant is not cut off.
         fun widths(): List<Long> = rows.indices.map { line ->
-            sci(Sci.SCI_POINTXFROMPOSITION, 0, sci(Sci.SCI_GETLINEENDPOSITION, line.toLong())) -
-                sci(Sci.SCI_POINTXFROMPOSITION, 0, sci(Sci.SCI_POSITIONFROMLINE, line.toLong()))
+            val start = sci(Sci.SCI_POSITIONFROMLINE, line.toLong())
+            sci(Sci.SCI_POINTXFROMPOSITION, 0, sci(Sci.SCI_POSITIONRELATIVE, start, 9)) - sci(Sci.SCI_POINTXFROMPOSITION, 0, start)
         }
         fun chooseFont(label: String) {
             openMenu("Settings", "Style Configurator...")
@@ -2710,7 +2712,7 @@ class WalkthroughTest {
             setText(rows.joinToString("\n") + "\n")
             val regular = widths()
             assertTrue("the rows have a width", regular[0] > 0)
-            assertEquals("ten characters are as wide as any other ten: $regular", 1, regular.toSet().size)
+            assertEquals("nine characters are as wide as any other nine: $regular", 1, regular.toSet().size)
             assertTrue("the font that comes with the app is fixed-width", onUi { Fonts.isFixedWidth(Fonts.mono(it)) })
             shot("font-fixed-width")
 

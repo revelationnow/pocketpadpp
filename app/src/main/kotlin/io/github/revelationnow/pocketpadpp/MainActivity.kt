@@ -409,7 +409,8 @@ open class MainActivity : Activity() {
     private fun handleIntent(intent: Intent?) {
         val uri = intent?.data ?: return
         if (intent.action == Intent.ACTION_VIEW || intent.action == Intent.ACTION_EDIT) {
-            if (acceptsFromOutside(uri)) openUris(listOf(uri))
+            // The second window is only ever started by the app itself, also for its own files such as the startup script.
+            if (secondWindow || acceptsFromOutside(uri)) openUris(listOf(uri))
             intent.data = null
         }
     }
