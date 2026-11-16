@@ -340,9 +340,10 @@ tools/record_demos.sh          # records the clips above; with ffmpeg, also make
 ```
 
 Three sets of tests run on every push: 81 checks on the native layer and about 780 on the application logic,
-both on a desktop JVM against the real Scintilla and Lua, and 38 walkthroughs that drive the real app on an
+both on a desktop JVM against the real Scintilla and Lua, and 40 walkthroughs that drive the real app on an
 Android emulator through typing, menus, settings, themes, tabs, files, search, gestures, shortcuts and the
-plugins, saving a screenshot at each step. The screenshots above come from it. See [docs/TESTING.md](docs/TESTING.md).
+plugins, saving a screenshot at each step. The screenshots above come from it. The desktop checks run a
+second time with the C++ built under the address and undefined-behaviour sanitizers. See [docs/TESTING.md](docs/TESTING.md).
 
 ## Contributing
 
